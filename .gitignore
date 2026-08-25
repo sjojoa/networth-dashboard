@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# Excel lock files, if you have the workbook open
+~$*.xlsx
+
+# The compiled macOS launcher is a local build artifact.
+# Run ./launcher/build_launcher.sh to make your own.
+Net Worth Dashboard.app/
