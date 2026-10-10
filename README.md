@@ -108,6 +108,12 @@ Starts from your latest balances and compounds three groups forward —
 its own monthly contribution and average annual return (defaults 7% / 7% / 4%).
 Cash, property, custom categories and debt are held at today's balance.
 
+- **Set per account** — tick it on any group to give each of its accounts its
+  own monthly contribution and return (say, a 401(k) with an employer match
+  next to an IRA in bond funds). Each group switches independently; the rest
+  keep one shared setting. Switching on starts every account at the group's
+  return and an even share of its contribution, so nothing moves until you
+  edit. Per-account settings stay with the account across owner views.
 - Pick how many years to project, and switch between nominal dollars and
   **today's dollars** (deflated by the inflation rate you set).
 - Tiles break the result into today's balance + contributions + growth, which

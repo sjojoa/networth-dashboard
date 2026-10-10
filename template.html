@@ -253,6 +253,17 @@
     outline: none; width: 100%; min-width: 0; padding: 6px 0; font-variant-numeric: tabular-nums;
   }
   .proj-globals { padding-top: 14px; }
+  .proj-group .adv {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+    font-size: 12px; color: var(--text-secondary); cursor: pointer;
+  }
+  .proj-group .adv input { margin: 0; accent-color: var(--c-1); }
+  .proj-group .adv:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+  .proj-acct { margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--border); }
+  .proj-acct .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .proj-acct .anm { font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .proj-acct .chip { margin-left: 0; }
+  .proj-acct .fields { margin-top: 6px; }
 
   @media (max-width: 900px) {
     .hero-row, .grid2, .proj-row { grid-template-columns: 1fr; }
@@ -1225,8 +1236,12 @@ function toggleSeries(key) {
    The groups below compound at their own rate with a monthly contribution;
    every other balance (cash, property, custom categories, debt) is held at its
    latest value. Returns are shared across owner views — they describe the
-   market — while contributions are kept per owner view, since "Everyone" isn't
-   necessarily the sum of what each person typed.                           */
+   market — while group contributions are kept per owner view, since
+   "Everyone" isn't necessarily the sum of what each person typed.
+
+   Any group can switch to per-account settings instead. Those values belong
+   to the account, not the owner view: an account has one owner, so it
+   contributes the same whether you're looking at Everyone or just them.    */
 const PROJ_GROUPS = [
   { cat: "Taxable investing", label: "Investments", ret: 7 },
   { cat: "Retirement", label: "Retirement", ret: 7 },
@@ -1235,11 +1250,14 @@ const PROJ_GROUPS = [
 const PROJ_KEY = "nw-projection";
 const projVar = (cat) => catVar[cat] || CATEGORY_VAR_FIXED[cat] || "--c-5";
 const proj = (() => {
-  const base = { years: 30, inflation: 3, real: false, returns: {}, monthly: {} };
+  const base = { years: 30, inflation: 3, real: false, returns: {}, monthly: {}, advanced: {}, acctReturns: {}, acctMonthly: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(PROJ_KEY));
     if (saved && typeof saved === "object") Object.assign(base, saved);
   } catch (e) { /* storage blocked or corrupt — fall back to defaults */ }
+  ["returns", "monthly", "advanced", "acctReturns", "acctMonthly"].forEach((k) => {
+    if (!base[k] || typeof base[k] !== "object") base[k] = {};
+  });
   PROJ_GROUPS.forEach((g) => { if (!isFinite(base.returns[g.cat])) base.returns[g.cat] = g.ret; });
   return base;
 })();
@@ -1254,33 +1272,93 @@ function monthlyFor(cat) {
   const scope = proj.monthly[state.owner] || {};
   return isFinite(scope[cat]) ? scope[cat] : 0;
 }
+// Closed accounts hold nothing at the latest snapshot, so there's nothing to set.
+const projAccounts = (cat) => counted().filter((a) => a.category === cat && !a.closed);
+const acctReturn = (a) => (isFinite(proj.acctReturns[a.name]) ? proj.acctReturns[a.name] : proj.returns[a.category]);
+const acctMonthly = (a) => (isFinite(proj.acctMonthly[a.name]) ? proj.acctMonthly[a.name] : 0);
+
+/* Switching a group to per-account starts each account from the group's
+   settings: its return, and an even share of the monthly contribution — so
+   flipping the switch doesn't move the projection until you change something. */
+function seedAccounts(cat) {
+  const accts = projAccounts(cat);
+  if (!accts.length) return;
+  const share = Math.round((monthlyFor(cat) / accts.length) * 100) / 100;
+  const fresh = accts.every((a) => !isFinite(proj.acctMonthly[a.name]) && !isFinite(proj.acctReturns[a.name]));
+  if (!fresh) return;           // keep what was typed last time it was on
+  accts.forEach((a) => {
+    proj.acctMonthly[a.name] = share;
+    proj.acctReturns[a.name] = proj.returns[cat];
+  });
+}
+
+const numField = (label, attr, key, value, affix, opts) =>
+  `<label class="fld"><span>${label}</span><span class="in">`
+  + (affix === "$" ? `<span class="affix">$</span>` : "")
+  + `<input type="number" ${opts} inputmode="decimal" ${attr}="${esc(key)}" value="${value === "" ? "" : esc(value)}">`
+  + (affix !== "$" ? `<span class="affix">${affix}</span>` : "")
+  + `</span></label>`;
+
+function renderProjForm() {
+  document.getElementById("projForm").innerHTML = PROJ_GROUPS.map((g) => {
+    const adv = !!proj.advanced[g.cat];
+    const accts = projAccounts(g.cat);
+    const start = sumAt(counted().filter((a) => a.category === g.cat), LAST);
+    let body;
+    if (!adv) {
+      body = `<div class="fields">`
+        + numField("Monthly contribution", "data-monthly", g.cat, monthlyFor(g.cat) || "", "$", `min="0" step="50"`)
+        + numField("Average annual return", "data-return", g.cat, proj.returns[g.cat], "%", `min="-50" max="50" step="0.1"`)
+        + `</div>`;
+    } else if (!accts.length) {
+      body = `<div class="note" style="margin-top:8px">No open accounts in this group for the current owner filter.</div>`;
+    } else {
+      body = accts.map((a) =>
+        `<div class="proj-acct"><div class="hd">`
+        + `<span class="anm">${esc(a.name)}${a.owner && state.owner === "all" ? ` <span class="chip" style="--own: var(${ownerVar(a.owner)})"><span class="dot"></span>${esc(a.owner)}</span>` : ""}</span>`
+        + `<span class="bal">${money(a.series[LAST])}</span></div>`
+        + `<div class="fields">`
+        + numField("Monthly", "data-acct-monthly", a.name, acctMonthly(a) || "", "$", `min="0" step="50"`)
+        + numField("Annual return", "data-acct-return", a.name, acctReturn(a), "%", `min="-50" max="50" step="0.1"`)
+        + `</div></div>`).join("");
+    }
+    return `<div class="proj-group"><div class="hd">`
+      + `<span class="nm"><span class="dot" style="background: var(${projVar(g.cat)})"></span>${esc(g.label)}</span>`
+      + `<span class="bal">${money(start)} today</span></div>`
+      + `<label class="adv"><input type="checkbox" data-adv="${esc(g.cat)}"${adv ? " checked" : ""}${accts.length ? "" : (adv ? "" : " disabled")}>`
+      + `Set per account${accts.length ? ` <span class="flat">(${plural(accts.length, "account")})</span>` : ""}</label>`
+      + body + `</div>`;
+  }).join("");
+}
 
 function buildProjForm() {
-  document.getElementById("projForm").innerHTML = PROJ_GROUPS.map((g) =>
-    `<div class="proj-group"><div class="hd">`
-    + `<span class="nm"><span class="dot" style="background: var(${projVar(g.cat)})"></span>${esc(g.label)}</span>`
-    + `<span class="bal" data-bal="${esc(g.cat)}"></span></div>`
-    + `<div class="fields">`
-    + `<label class="fld"><span>Monthly contribution</span><span class="in"><span class="affix">$</span>`
-    + `<input type="number" min="0" step="50" inputmode="decimal" data-monthly="${esc(g.cat)}"></span></label>`
-    + `<label class="fld"><span>Average annual return</span><span class="in">`
-    + `<input type="number" min="-50" max="50" step="0.1" inputmode="decimal" data-return="${esc(g.cat)}"><span class="affix">%</span></span></label>`
-    + `</div></div>`).join("");
-
-  const form = document.getElementById("projView");
-  form.addEventListener("input", (e) => {
-    const el = e.target;
-    if (el.dataset.monthly) {
+  const view = document.getElementById("projView");
+  view.addEventListener("input", (e) => {
+    const el = e.target, d = el.dataset;
+    if (d.monthly) {
       proj.monthly[state.owner] = proj.monthly[state.owner] || {};
-      proj.monthly[state.owner][el.dataset.monthly] = clampNum(el.value, 0, 1e9, 0);
-    } else if (el.dataset.return) {
-      proj.returns[el.dataset.return] = clampNum(el.value, -50, 50, 0);
+      proj.monthly[state.owner][d.monthly] = clampNum(el.value, 0, 1e9, 0);
+    } else if (d.return) {
+      proj.returns[d.return] = clampNum(el.value, -50, 50, 0);
+    } else if (d.acctMonthly) {
+      proj.acctMonthly[d.acctMonthly] = clampNum(el.value, 0, 1e9, 0);
+    } else if (d.acctReturn) {
+      proj.acctReturns[d.acctReturn] = clampNum(el.value, -50, 50, 0);
     } else if (el.id === "projYears") {
       proj.years = Math.round(clampNum(el.value, 1, 60, proj.years));
     } else if (el.id === "projInflation") {
       proj.inflation = clampNum(el.value, 0, 20, 0);
     } else return;
     saveProj();
+    renderProjection();
+  });
+  view.addEventListener("change", (e) => {
+    const cat = e.target.dataset.adv;
+    if (!cat) return;
+    proj.advanced[cat] = e.target.checked;
+    if (e.target.checked) seedAccounts(cat);
+    saveProj();
+    projFormKey = null;          // the form's shape changed; rebuild it
     renderProjection();
   });
   document.querySelectorAll("[data-real]").forEach((b) => {
@@ -1294,46 +1372,55 @@ function buildProjForm() {
   document.getElementById("projInflation").value = proj.inflation;
 }
 
-/* Fill the inputs from saved values. Only done when the owner view changes,
-   so re-rendering while someone types never rewrites the field under them. */
-let projScopeShown = null;
+/* Rebuild the form only when its shape changes — a new owner view or a group
+   switched to or from per-account — so re-rendering while someone types never
+   rewrites the field under them. */
+let projFormKey = null;
 function syncProjInputs() {
-  if (projScopeShown === state.owner) return;
-  projScopeShown = state.owner;
-  PROJ_GROUPS.forEach((g) => {
-    document.querySelector(`[data-monthly="${g.cat}"]`).value = monthlyFor(g.cat) || "";
-    document.querySelector(`[data-return="${g.cat}"]`).value = proj.returns[g.cat];
-  });
+  const key = state.owner + "|" + PROJ_GROUPS.map((g) => (proj.advanced[g.cat] ? 1 : 0)).join("");
+  if (projFormKey === key) return;
+  projFormKey = key;
+  renderProjForm();
 }
 
 /* Month-by-month: each balance grows by its monthly-equivalent rate, then the
    contribution lands at month end. Sampled once a year. In today's-dollar mode
-   every figure is divided by cumulative inflation to that month. */
+   every figure is divided by cumulative inflation to that month. A group is
+   one pot, or — set per account — one pot per account, summed. */
 function project() {
   const grouped = PROJ_GROUPS.map((g) => g.cat);
-  const groups = PROJ_GROUPS.map((g) => ({
-    cat: g.cat, label: g.label, cssVar: projVar(g.cat),
-    start: sumAt(counted().filter((a) => a.category === g.cat), LAST),
-    monthly: monthlyFor(g.cat),
-    growth: Math.pow(1 + proj.returns[g.cat] / 100, 1 / 12),
-  }));
+  const rate = (pctPerYear) => Math.pow(1 + pctPerYear / 100, 1 / 12);
+  const groups = PROJ_GROUPS.map((g) => {
+    const adv = !!proj.advanced[g.cat];
+    const all = counted().filter((a) => a.category === g.cat);
+    const start = sumAt(all, LAST);
+    const pots = adv
+      ? projAccounts(g.cat).map((a) => ({ start: a.series[LAST], monthly: acctMonthly(a), growth: rate(acctReturn(a)) }))
+      : [{ start, monthly: monthlyFor(g.cat), growth: rate(proj.returns[g.cat]) }];
+    return {
+      cat: g.cat, label: g.label, cssVar: projVar(g.cat), adv, start, pots,
+      monthly: pots.reduce((t, p) => t + p.monthly, 0),
+    };
+  });
   const flat = sumAt(counted().filter((a) => grouped.indexOf(a.category) < 0), LAST);
   const startNet = flat + groups.reduce((t, g) => t + g.start, 0);
   const deflator = (m) => (proj.real ? Math.pow(1 + proj.inflation / 100, m / 12) : 1);
   const perMonth = groups.reduce((t, g) => t + g.monthly, 0);
 
-  const bal = groups.map((g) => g.start);
+  // Closed accounts are left out of the pots but hold $0, so group totals still match.
+  const bal = groups.map((g) => g.pots.map((p) => p.start));
+  const groupSum = (j) => bal[j].reduce((a, b) => a + b, 0);
   let contributed = 0;               // in the display units, so the pieces add up
   const rows = [];
   const snap = (m) => {
     const d = deflator(m);
-    const vals = bal.map((b) => b / d);
-    const net = (flat + bal.reduce((a, b) => a + b, 0)) / d;
+    const vals = groups.map((_, j) => groupSum(j) / d);
+    const net = flat / d + vals.reduce((a, b) => a + b, 0);
     rows.push({ year: m / 12, groups: vals, flat: flat / d, net, contributed, baseline: startNet + contributed });
   };
   snap(0);
   for (let m = 1; m <= proj.years * 12; m++) {
-    groups.forEach((g, j) => { bal[j] = bal[j] * g.growth + g.monthly; });
+    groups.forEach((g, j) => g.pots.forEach((p, k) => { bal[j][k] = bal[j][k] * p.growth + p.monthly; }));
     contributed += perMonth / deflator(m);
     if (m % 12 === 0) snap(m);
   }
@@ -1350,13 +1437,10 @@ function renderProjection() {
 
   document.querySelectorAll("[data-real]").forEach((b) =>
     b.setAttribute("aria-pressed", String((b.dataset.real === "1") === proj.real)));
-  P.groups.forEach((g) => {
-    document.querySelector(`[data-bal="${g.cat}"]`).textContent = money(g.start) + " today";
-  });
   document.getElementById("projScope").textContent =
     `Starting from balances on ${longDate(ALL_DATES[LAST])}`
     + (state.owner === "all" ? " for everyone." : ` for ${state.owner}.`)
-    + (OWNERS.length > 1 ? " Contributions are saved separately for each owner view." : "");
+    + (OWNERS.length > 1 ? " Group contributions are saved separately for each owner view; per-account settings stay with the account." : "");
   const others = CATEGORIES.filter((c) => PROJ_GROUPS.every((g) => g.cat !== c) && counted().some((a) => a.category === c));
   document.getElementById("projFlatNote").textContent = others.length
     ? `${others.join(", ")} (${money(P.flat)} combined) ${others.length === 1 ? "is" : "are"} held at today's balance${proj.real ? ", so inflation erodes their value in today's dollars" : ""}.`
@@ -1369,7 +1453,9 @@ function renderProjection() {
     { label: "Contributions", value: money(end.contributed), sub: `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}` },
     { label: proj.real ? "Growth after inflation" : "Investment growth", value: signed(growth), cls: dirClass(growth),
       sub: end.contributed + Math.abs(P.startNet) > 0 ? `${(growth / Math.max(1, end.net) * 100).toFixed(0)}% of the projected total` : "" },
-  ].concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: `${proj.returns[g.cat]}%/yr · ${money(g.monthly)}/mo` })));
+  ].concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: g.adv
+      ? `${plural(g.pots.length, "account")} · ${money(g.monthly)}/mo`
+      : `${proj.returns[g.cat]}%/yr · ${money(g.monthly)}/mo` })));
   document.getElementById("projTiles").innerHTML = tiles.map((t) =>
     `<div class="card tile"><div class="label">${esc(t.label)}</div>`
     + `<div class="value${t.cls ? " " + t.cls : ""}">${t.value}</div>`
