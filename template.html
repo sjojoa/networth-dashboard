@@ -253,12 +253,12 @@
     outline: none; width: 100%; min-width: 0; padding: 6px 0; font-variant-numeric: tabular-nums;
   }
   .proj-globals { padding-top: 14px; }
-  .proj-group .adv {
+  .adv {
     display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
     font-size: 12px; color: var(--text-secondary); cursor: pointer;
   }
-  .proj-group .adv input { margin: 0; accent-color: var(--c-1); }
-  .proj-group .adv:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+  .adv input { margin: 0; accent-color: var(--c-1); }
+  .adv:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
   .proj-acct { margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--border); }
   .proj-acct .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .proj-acct .anm { font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
@@ -384,6 +384,11 @@
             <span class="in"><input type="number" id="projYears" min="1" max="60" step="1" inputmode="numeric"><span class="affix">yrs</span></span></label>
           <label class="fld"><span>Inflation</span>
             <span class="in"><input type="number" id="projInflation" min="0" max="20" step="0.1" inputmode="decimal"><span class="affix">%/yr</span></span></label>
+        </div>
+        <label class="adv" style="margin-top:14px"><input type="checkbox" id="projRaiseOn">Increase contributions each year</label>
+        <div class="fields" id="projRaiseFields" hidden>
+          <label class="fld"><span>Yearly increase</span>
+            <span class="in"><input type="number" id="projRaisePct" min="0" max="50" step="0.5" inputmode="decimal"><span class="affix">%/yr</span></span></label>
         </div>
         <div class="note" id="projFlatNote" style="margin-top:12px"></div>
       </div>
@@ -1250,7 +1255,7 @@ const PROJ_GROUPS = [
 const PROJ_KEY = "nw-projection";
 const projVar = (cat) => catVar[cat] || CATEGORY_VAR_FIXED[cat] || "--c-5";
 const proj = (() => {
-  const base = { years: 30, inflation: 3, real: false, returns: {}, monthly: {}, advanced: {}, acctReturns: {}, acctMonthly: {} };
+  const base = { years: 30, inflation: 3, real: false, raiseOn: false, raisePct: 3, returns: {}, monthly: {}, advanced: {}, acctReturns: {}, acctMonthly: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(PROJ_KEY));
     if (saved && typeof saved === "object") Object.assign(base, saved);
@@ -1348,11 +1353,20 @@ function buildProjForm() {
       proj.years = Math.round(clampNum(el.value, 1, 60, proj.years));
     } else if (el.id === "projInflation") {
       proj.inflation = clampNum(el.value, 0, 20, 0);
+    } else if (el.id === "projRaisePct") {
+      proj.raisePct = clampNum(el.value, 0, 50, 0);
     } else return;
     saveProj();
     renderProjection();
   });
   view.addEventListener("change", (e) => {
+    if (e.target.id === "projRaiseOn") {
+      proj.raiseOn = e.target.checked;
+      document.getElementById("projRaiseFields").hidden = !proj.raiseOn;
+      saveProj();
+      renderProjection();
+      return;
+    }
     const cat = e.target.dataset.adv;
     if (!cat) return;
     proj.advanced[cat] = e.target.checked;
@@ -1370,6 +1384,9 @@ function buildProjForm() {
   });
   document.getElementById("projYears").value = proj.years;
   document.getElementById("projInflation").value = proj.inflation;
+  document.getElementById("projRaiseOn").checked = proj.raiseOn;
+  document.getElementById("projRaisePct").value = proj.raisePct;
+  document.getElementById("projRaiseFields").hidden = !proj.raiseOn;
 }
 
 /* Rebuild the form only when its shape changes — a new owner view or a group
@@ -1386,7 +1403,9 @@ function syncProjInputs() {
 /* Month-by-month: each balance grows by its monthly-equivalent rate, then the
    contribution lands at month end. Sampled once a year. In today's-dollar mode
    every figure is divided by cumulative inflation to that month. A group is
-   one pot, or — set per account — one pot per account, summed. */
+   one pot, or — set per account — one pot per account, summed. With yearly
+   increases on, every contribution steps up once a year, like a raise: year 1
+   pays the amounts as typed, year 2 pays them × (1 + increase), and so on. */
 function project() {
   const grouped = PROJ_GROUPS.map((g) => g.cat);
   const rate = (pctPerYear) => Math.pow(1 + pctPerYear / 100, 1 / 12);
@@ -1406,6 +1425,8 @@ function project() {
   const startNet = flat + groups.reduce((t, g) => t + g.start, 0);
   const deflator = (m) => (proj.real ? Math.pow(1 + proj.inflation / 100, m / 12) : 1);
   const perMonth = groups.reduce((t, g) => t + g.monthly, 0);
+  const raise = proj.raiseOn ? 1 + proj.raisePct / 100 : 1;
+  const stepUp = (m) => Math.pow(raise, Math.floor((m - 1) / 12));   // month 1–12 → ×1
 
   // Closed accounts are left out of the pots but hold $0, so group totals still match.
   const bal = groups.map((g) => g.pots.map((p) => p.start));
@@ -1420,11 +1441,12 @@ function project() {
   };
   snap(0);
   for (let m = 1; m <= proj.years * 12; m++) {
-    groups.forEach((g, j) => g.pots.forEach((p, k) => { bal[j][k] = bal[j][k] * p.growth + p.monthly; }));
-    contributed += perMonth / deflator(m);
+    const f = stepUp(m);
+    groups.forEach((g, j) => g.pots.forEach((p, k) => { bal[j][k] = bal[j][k] * p.growth + p.monthly * f; }));
+    contributed += (perMonth * f) / deflator(m);
     if (m % 12 === 0) snap(m);
   }
-  return { groups, flat, startNet, perMonth, rows };
+  return { groups, flat, startNet, perMonth, finalMonthly: perMonth * stepUp(proj.years * 12), rows };
 }
 
 function renderProjection() {
@@ -1450,7 +1472,9 @@ function renderProjection() {
   const growth = end.net - end.baseline;
   const tiles = [
     { label: `Net worth in ${yearOf(end)}`, value: money(end.net), sub: `from ${money(P.startNet)} today` },
-    { label: "Contributions", value: money(end.contributed), sub: `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}` },
+    { label: "Contributions", value: money(end.contributed), sub: proj.raiseOn && proj.raisePct > 0 && P.perMonth > 0
+      ? `${money(P.perMonth)} → ${money(P.finalMonthly)}/mo`
+      : `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}` },
     { label: proj.real ? "Growth after inflation" : "Investment growth", value: signed(growth), cls: dirClass(growth),
       sub: end.contributed + Math.abs(P.startNet) > 0 ? `${(growth / Math.max(1, end.net) * 100).toFixed(0)}% of the projected total` : "" },
   ].concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: g.adv
@@ -1459,10 +1483,11 @@ function renderProjection() {
   document.getElementById("projTiles").innerHTML = tiles.map((t) =>
     `<div class="card tile"><div class="label">${esc(t.label)}</div>`
     + `<div class="value${t.cls ? " " + t.cls : ""}">${t.value}</div>`
-    + `<div class="delta flat" style="font-weight:400">${esc(t.sub)}</div></div>`).join("");
+    + `<div class="delta flat" style="font-weight:400; white-space:normal">${esc(t.sub)}</div></div>`).join("");
 
   document.getElementById("projNote").textContent =
     `${baseYear} → ${yearOf(end)} in ${unit} · compounded monthly, contributions at month end`
+    + (proj.raiseOn && proj.raisePct > 0 ? `, rising ${proj.raisePct}% each year` : "")
     + (proj.real ? ` · ${proj.inflation}%/yr inflation` : "");
 
   // ── chart ──

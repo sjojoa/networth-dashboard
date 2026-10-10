@@ -114,6 +114,10 @@ Cash, property, custom categories and debt are held at today's balance.
   keep one shared setting. Switching on starts every account at the group's
   return and an even share of its contribution, so nothing moves until you
   edit. Per-account settings stay with the account across owner views.
+- **Increase contributions each year** — one checkbox for every contribution
+  on the page, group and per-account alike. Each year's deposits are the
+  previous year's plus the percentage you set (3% by default), stepping up
+  once a year like a raise.
 - Pick how many years to project, and switch between nominal dollars and
   **today's dollars** (deflated by the inflation rate you set).
 - Tiles break the result into today's balance + contributions + growth, which
