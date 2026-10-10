@@ -101,6 +101,25 @@ per account with its balance, change, share and sparkline.
 
 Light and dark themes, with the choice remembered.
 
+**A Projection tab**
+
+Starts from your latest balances and compounds three groups forward —
+**Investments** (`Taxable investing`), **Retirement** and **Bonds** — each with
+its own monthly contribution and average annual return (defaults 7% / 7% / 4%).
+Cash, property, custom categories and debt are held at today's balance.
+
+- Pick how many years to project, and switch between nominal dollars and
+  **today's dollars** (deflated by the inflation rate you set).
+- Tiles break the result into today's balance + contributions + growth, which
+  always add up to the projected total.
+- Hover the chart for any year; the table below lists every year.
+- The Owner filter applies, and contributions are saved separately per owner
+  view. Inputs are remembered in the browser, so rebuilding the dashboard keeps them.
+
+Compounding is monthly, with contributions landing at month end. It's a
+straight-line average-return model — real returns vary year to year, so treat
+the output as a rough guide rather than a forecast.
+
 ### The $ / % switch
 
 Percent means something specific to each chart, so each one says which in its

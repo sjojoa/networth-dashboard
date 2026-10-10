@@ -225,8 +225,37 @@
   .scroll { overflow-x: auto; max-height: 560px; overflow-y: auto; margin-top: 12px; }
   tbody tr:hover td { background: var(--ghost); }
 
+  .tabs { display: flex; gap: 2px; margin-top: 18px; border-bottom: 1px solid var(--border); }
+  .tabs button {
+    border: none; background: none; border-radius: 6px 6px 0 0; margin-bottom: -1px;
+    border-bottom: 2px solid transparent; padding: 8px 14px;
+  }
+  .tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--c-1); }
+  body.view-proj .dash-only { display: none !important; }
+
+  .proj-row { display: grid; grid-template-columns: minmax(320px, 1fr) 1.8fr; gap: 16px; align-items: start; margin-top: 20px; }
+  .proj-group { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .proj-group:first-of-type { padding-top: 10px; }
+  .proj-group .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .proj-group .nm { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+  .proj-group .nm .dot { width: 9px; height: 9px; border-radius: 3px; }
+  .proj-group .bal { color: var(--text-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+  .fld .in {
+    display: flex; align-items: center; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; min-height: 34px; padding: 0 9px; gap: 4px;
+  }
+  .fld .in:focus-within { outline: 2px solid var(--c-1); outline-offset: 1px; }
+  .fld .affix { color: var(--text-muted); font-size: 13px; }
+  .fld input {
+    font: inherit; font-size: 13px; color: var(--text-primary); background: none; border: none;
+    outline: none; width: 100%; min-width: 0; padding: 6px 0; font-variant-numeric: tabular-nums;
+  }
+  .proj-globals { padding-top: 14px; }
+
   @media (max-width: 900px) {
-    .hero-row, .grid2 { grid-template-columns: 1fr; }
+    .hero-row, .grid2, .proj-row { grid-template-columns: 1fr; }
     .dd-menu { right: auto; left: 0; }
   }
 </style>
@@ -241,27 +270,33 @@
     <button id="themeBtn" type="button">Dark mode</button>
   </header>
 
-  <div class="filters" role="group" aria-label="Dashboard filters">
-    <span class="label">Range</span>
-    <div class="seg" id="rangeSeg"></div>
-    <div class="dates" id="dateInputs">
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button type="button" role="tab" id="tabDash" data-view="dash" aria-controls="dashView" aria-selected="true">Overview</button>
+    <button type="button" role="tab" id="tabProj" data-view="proj" aria-controls="projView" aria-selected="false">Projection</button>
+  </nav>
+
+  <div class="filters" id="filters" role="group" aria-label="Dashboard filters">
+    <span class="label dash-only">Range</span>
+    <div class="seg dash-only" id="rangeSeg"></div>
+    <div class="dates dash-only" id="dateInputs">
       <input type="date" id="dateFrom" aria-label="Range start">
       <span class="label">to</span>
       <input type="date" id="dateTo" aria-label="Range end">
     </div>
     <span class="label" id="ownerLabel">Owner</span>
     <div class="seg" id="ownerSeg"></div>
-    <span class="label">Values</span>
-    <div class="seg" id="modeSeg">
+    <span class="label dash-only">Values</span>
+    <div class="seg dash-only" id="modeSeg">
       <button type="button" data-mode="money" aria-pressed="true" title="Show dollar amounts">$</button>
       <button type="button" data-mode="pct" aria-pressed="false" title="Show percentages">%</button>
     </div>
-    <button id="closedBtn" type="button" aria-pressed="false" hidden></button>
+    <button id="closedBtn" class="dash-only" type="button" aria-pressed="false" hidden></button>
     <span class="spacer"></span>
-    <button id="tableBtn" type="button" aria-pressed="false">Table view</button>
+    <button id="tableBtn" class="dash-only" type="button" aria-pressed="false">Table view</button>
   </div>
-  <div class="filter-note" id="filterNote"></div>
+  <div class="filter-note dash-only" id="filterNote"></div>
 
+  <div id="dashView" role="tabpanel" aria-labelledby="tabDash">
   <div class="hero-row" style="margin-top:20px">
     <div class="card hero">
       <div class="label" id="heroLabel">Net worth</div>
@@ -324,6 +359,45 @@
     <h2>All snapshots</h2>
     <div class="note" id="tableNote"></div>
     <div class="scroll" id="tableWrap"></div>
+  </div>
+  </div>
+
+  <div id="projView" role="tabpanel" aria-labelledby="tabProj" hidden>
+    <div class="proj-row">
+      <div class="card">
+        <h2>Assumptions</h2>
+        <div class="note" id="projScope"></div>
+        <div id="projForm"></div>
+        <div class="proj-globals fields">
+          <label class="fld"><span>Years to project</span>
+            <span class="in"><input type="number" id="projYears" min="1" max="60" step="1" inputmode="numeric"><span class="affix">yrs</span></span></label>
+          <label class="fld"><span>Inflation</span>
+            <span class="in"><input type="number" id="projInflation" min="0" max="20" step="0.1" inputmode="decimal"><span class="affix">%/yr</span></span></label>
+        </div>
+        <div class="note" id="projFlatNote" style="margin-top:12px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Projected net worth</h2>
+          <div class="ctl seg" id="projDollarSeg">
+            <button type="button" data-real="0" aria-pressed="true" title="Future dollars, not adjusted for inflation">Nominal</button>
+            <button type="button" data-real="1" aria-pressed="false" title="Adjusted for inflation into today's purchasing power">Today's $</button>
+          </div>
+        </div>
+        <div class="note" id="projNote"></div>
+        <div class="legend" id="projLegend"></div>
+        <div class="plot" id="projPlot"><div class="tip" id="projTip"></div></div>
+      </div>
+    </div>
+
+    <div class="tiles" id="projTiles"></div>
+
+    <div class="card stack">
+      <h2>Year by year</h2>
+      <div class="note" id="projTableNote"></div>
+      <div class="scroll" id="projTableWrap"></div>
+    </div>
   </div>
 </div>
 
@@ -1147,6 +1221,274 @@ function toggleSeries(key) {
   renderAll();
 }
 
+/* ── projection ────────────────────────────────────────────────────────────
+   The groups below compound at their own rate with a monthly contribution;
+   every other balance (cash, property, custom categories, debt) is held at its
+   latest value. Returns are shared across owner views — they describe the
+   market — while contributions are kept per owner view, since "Everyone" isn't
+   necessarily the sum of what each person typed.                           */
+const PROJ_GROUPS = [
+  { cat: "Taxable investing", label: "Investments", ret: 7 },
+  { cat: "Retirement", label: "Retirement", ret: 7 },
+  { cat: "Bonds", label: "Bonds", ret: 4 },
+];
+const PROJ_KEY = "nw-projection";
+const projVar = (cat) => catVar[cat] || CATEGORY_VAR_FIXED[cat] || "--c-5";
+const proj = (() => {
+  const base = { years: 30, inflation: 3, real: false, returns: {}, monthly: {} };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROJ_KEY));
+    if (saved && typeof saved === "object") Object.assign(base, saved);
+  } catch (e) { /* storage blocked or corrupt — fall back to defaults */ }
+  PROJ_GROUPS.forEach((g) => { if (!isFinite(base.returns[g.cat])) base.returns[g.cat] = g.ret; });
+  return base;
+})();
+function saveProj() {
+  try { localStorage.setItem(PROJ_KEY, JSON.stringify(proj)); } catch (e) { /* not persisted; still works */ }
+}
+const clampNum = (v, lo, hi, fallback) => {
+  const x = parseFloat(v);
+  return isFinite(x) ? Math.min(hi, Math.max(lo, x)) : fallback;
+};
+function monthlyFor(cat) {
+  const scope = proj.monthly[state.owner] || {};
+  return isFinite(scope[cat]) ? scope[cat] : 0;
+}
+
+function buildProjForm() {
+  document.getElementById("projForm").innerHTML = PROJ_GROUPS.map((g) =>
+    `<div class="proj-group"><div class="hd">`
+    + `<span class="nm"><span class="dot" style="background: var(${projVar(g.cat)})"></span>${esc(g.label)}</span>`
+    + `<span class="bal" data-bal="${esc(g.cat)}"></span></div>`
+    + `<div class="fields">`
+    + `<label class="fld"><span>Monthly contribution</span><span class="in"><span class="affix">$</span>`
+    + `<input type="number" min="0" step="50" inputmode="decimal" data-monthly="${esc(g.cat)}"></span></label>`
+    + `<label class="fld"><span>Average annual return</span><span class="in">`
+    + `<input type="number" min="-50" max="50" step="0.1" inputmode="decimal" data-return="${esc(g.cat)}"><span class="affix">%</span></span></label>`
+    + `</div></div>`).join("");
+
+  const form = document.getElementById("projView");
+  form.addEventListener("input", (e) => {
+    const el = e.target;
+    if (el.dataset.monthly) {
+      proj.monthly[state.owner] = proj.monthly[state.owner] || {};
+      proj.monthly[state.owner][el.dataset.monthly] = clampNum(el.value, 0, 1e9, 0);
+    } else if (el.dataset.return) {
+      proj.returns[el.dataset.return] = clampNum(el.value, -50, 50, 0);
+    } else if (el.id === "projYears") {
+      proj.years = Math.round(clampNum(el.value, 1, 60, proj.years));
+    } else if (el.id === "projInflation") {
+      proj.inflation = clampNum(el.value, 0, 20, 0);
+    } else return;
+    saveProj();
+    renderProjection();
+  });
+  document.querySelectorAll("[data-real]").forEach((b) => {
+    b.addEventListener("click", () => {
+      proj.real = b.dataset.real === "1";
+      saveProj();
+      renderProjection();
+    });
+  });
+  document.getElementById("projYears").value = proj.years;
+  document.getElementById("projInflation").value = proj.inflation;
+}
+
+/* Fill the inputs from saved values. Only done when the owner view changes,
+   so re-rendering while someone types never rewrites the field under them. */
+let projScopeShown = null;
+function syncProjInputs() {
+  if (projScopeShown === state.owner) return;
+  projScopeShown = state.owner;
+  PROJ_GROUPS.forEach((g) => {
+    document.querySelector(`[data-monthly="${g.cat}"]`).value = monthlyFor(g.cat) || "";
+    document.querySelector(`[data-return="${g.cat}"]`).value = proj.returns[g.cat];
+  });
+}
+
+/* Month-by-month: each balance grows by its monthly-equivalent rate, then the
+   contribution lands at month end. Sampled once a year. In today's-dollar mode
+   every figure is divided by cumulative inflation to that month. */
+function project() {
+  const grouped = PROJ_GROUPS.map((g) => g.cat);
+  const groups = PROJ_GROUPS.map((g) => ({
+    cat: g.cat, label: g.label, cssVar: projVar(g.cat),
+    start: sumAt(counted().filter((a) => a.category === g.cat), LAST),
+    monthly: monthlyFor(g.cat),
+    growth: Math.pow(1 + proj.returns[g.cat] / 100, 1 / 12),
+  }));
+  const flat = sumAt(counted().filter((a) => grouped.indexOf(a.category) < 0), LAST);
+  const startNet = flat + groups.reduce((t, g) => t + g.start, 0);
+  const deflator = (m) => (proj.real ? Math.pow(1 + proj.inflation / 100, m / 12) : 1);
+  const perMonth = groups.reduce((t, g) => t + g.monthly, 0);
+
+  const bal = groups.map((g) => g.start);
+  let contributed = 0;               // in the display units, so the pieces add up
+  const rows = [];
+  const snap = (m) => {
+    const d = deflator(m);
+    const vals = bal.map((b) => b / d);
+    const net = (flat + bal.reduce((a, b) => a + b, 0)) / d;
+    rows.push({ year: m / 12, groups: vals, flat: flat / d, net, contributed, baseline: startNet + contributed });
+  };
+  snap(0);
+  for (let m = 1; m <= proj.years * 12; m++) {
+    groups.forEach((g, j) => { bal[j] = bal[j] * g.growth + g.monthly; });
+    contributed += perMonth / deflator(m);
+    if (m % 12 === 0) snap(m);
+  }
+  return { groups, flat, startNet, perMonth, rows };
+}
+
+function renderProjection() {
+  syncProjInputs();
+  const P = project();
+  const rows = P.rows, n = rows.length, end = rows[n - 1];
+  const baseYear = asDate(ALL_DATES[LAST]).getFullYear();
+  const yearOf = (r) => baseYear + r.year;
+  const unit = proj.real ? "today's dollars" : "nominal dollars";
+
+  document.querySelectorAll("[data-real]").forEach((b) =>
+    b.setAttribute("aria-pressed", String((b.dataset.real === "1") === proj.real)));
+  P.groups.forEach((g) => {
+    document.querySelector(`[data-bal="${g.cat}"]`).textContent = money(g.start) + " today";
+  });
+  document.getElementById("projScope").textContent =
+    `Starting from balances on ${longDate(ALL_DATES[LAST])}`
+    + (state.owner === "all" ? " for everyone." : ` for ${state.owner}.`)
+    + (OWNERS.length > 1 ? " Contributions are saved separately for each owner view." : "");
+  const others = CATEGORIES.filter((c) => PROJ_GROUPS.every((g) => g.cat !== c) && counted().some((a) => a.category === c));
+  document.getElementById("projFlatNote").textContent = others.length
+    ? `${others.join(", ")} (${money(P.flat)} combined) ${others.length === 1 ? "is" : "are"} held at today's balance${proj.real ? ", so inflation erodes their value in today's dollars" : ""}.`
+    : "";
+
+  // Tiles: start + contributions + growth = projected, all in the same units.
+  const growth = end.net - end.baseline;
+  const tiles = [
+    { label: `Net worth in ${yearOf(end)}`, value: money(end.net), sub: `from ${money(P.startNet)} today` },
+    { label: "Contributions", value: money(end.contributed), sub: `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}` },
+    { label: proj.real ? "Growth after inflation" : "Investment growth", value: signed(growth), cls: dirClass(growth),
+      sub: end.contributed + Math.abs(P.startNet) > 0 ? `${(growth / Math.max(1, end.net) * 100).toFixed(0)}% of the projected total` : "" },
+  ].concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: `${proj.returns[g.cat]}%/yr · ${money(g.monthly)}/mo` })));
+  document.getElementById("projTiles").innerHTML = tiles.map((t) =>
+    `<div class="card tile"><div class="label">${esc(t.label)}</div>`
+    + `<div class="value${t.cls ? " " + t.cls : ""}">${t.value}</div>`
+    + `<div class="delta flat" style="font-weight:400">${esc(t.sub)}</div></div>`).join("");
+
+  document.getElementById("projNote").textContent =
+    `${baseYear} → ${yearOf(end)} in ${unit} · compounded monthly, contributions at month end`
+    + (proj.real ? ` · ${proj.inflation}%/yr inflation` : "");
+
+  // ── chart ──
+  const series = [{ label: "Net worth", cssVar: "--c-1", vals: rows.map((r) => r.net) }]
+    .concat(P.groups.map((g, j) => ({ label: g.label, cssVar: g.cssVar, vals: rows.map((r) => r.groups[j]) })))
+    .concat([{ label: "Today + contributions", cssVar: "--text-muted", dash: true, vals: rows.map((r) => r.baseline) }]);
+  document.getElementById("projLegend").innerHTML = series.map((sv) =>
+    `<span class="item"><span class="ln" style="background: ${sv.dash ? `repeating-linear-gradient(90deg, var(${sv.cssVar}) 0 4px, transparent 4px 7px)` : `var(${sv.cssVar})`}"></span>${esc(sv.label)}</span>`).join("");
+
+  const plot = document.getElementById("projPlot");
+  const tip = document.getElementById("projTip");
+  const W = width(plot, 640), H = 300;
+  const m = { t: 18, r: 104, b: 30, l: 64 };
+  const iw = Math.max(60, W - m.l - m.r), ih = H - m.t - m.b;
+  const flatVals = series.reduce((acc, sv) => acc.concat(sv.vals), []);
+  const lo = Math.min(0, Math.min.apply(null, flatVals)), hi = Math.max.apply(null, flatVals);
+  const ticks = niceTicks(lo, hi * 1.05 || 1, 5);
+  const y0 = Math.min(ticks[0], lo), y1 = Math.max(ticks[ticks.length - 1], hi);
+  const X = (k) => m.l + (n === 1 ? iw / 2 : (k / (n - 1)) * iw);
+  const Y = (v) => m.t + ih - ((v - y0) / (y1 - y0 || 1)) * ih;
+
+  let s = "";
+  ticks.forEach((t) => {
+    s += `<line x1="${m.l}" y1="${Y(t).toFixed(1)}" x2="${m.l + iw}" y2="${Y(t).toFixed(1)}" stroke="var(${Math.abs(t) < 1e-9 ? "--axis" : "--grid"})" stroke-width="1"/>`;
+    s += `<text class="tick" x="${m.l - 9}" y="${(Y(t) + 3.5).toFixed(1)}" text-anchor="end">${axisMoney(t)}</text>`;
+  });
+  const netPts = series[0].vals.map((v, k) => `${X(k).toFixed(1)},${Y(v).toFixed(1)}`);
+  s += `<path d="M${m.l},${Y(Math.max(y0, 0)).toFixed(1)} L${netPts.join(" L")} L${(m.l + iw).toFixed(1)},${Y(Math.max(y0, 0)).toFixed(1)} Z" fill="var(--c-1)" fill-opacity="0.08"/>`;
+  // Net worth drawn last so it sits on top of the lines it's made of.
+  series.slice(1).concat(series.slice(0, 1)).forEach((sv) => {
+    const pts = sv.vals.map((v, k) => `${X(k).toFixed(1)},${Y(v).toFixed(1)}`);
+    s += `<path d="M${pts.join(" L")}" fill="none" stroke="var(${sv.cssVar})" stroke-width="${sv.dash ? 1.5 : 2}"${sv.dash ? ` stroke-dasharray="4 3"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  const placed = [];
+  series.forEach((sv) => {
+    if (sv.dash) return;
+    const y = Y(sv.vals[n - 1]);
+    s += `<circle cx="${X(n - 1).toFixed(1)}" cy="${y.toFixed(1)}" r="4.5" fill="var(${sv.cssVar})" stroke="var(--surface-1)" stroke-width="2"/>`;
+    if (placed.every((p) => Math.abs(p - y) >= 13)) {
+      placed.push(y);
+      s += `<text class="mark-label" x="${(X(n - 1) + 10).toFixed(1)}" y="${(y + 4).toFixed(1)}">${axisMoney(sv.vals[n - 1])}</text>`;
+    }
+  });
+  const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 52))));
+  rows.forEach((r, k) => {
+    if (k % every !== 0 && k !== n - 1) return;
+    if (k !== n - 1 && n - 1 - k < every * 0.6) return;
+    s += `<text class="tick" data-x x="${X(k).toFixed(1)}" y="${(m.t + ih + 19).toFixed(1)}" text-anchor="middle">${yearOf(r)}</text>`;
+  });
+  s += `<line x1="${m.l}" y1="${(m.t + ih).toFixed(1)}" x2="${m.l + iw}" y2="${(m.t + ih).toFixed(1)}" stroke="var(--axis)" stroke-width="1"/>`;
+  s += `<g id="projHover" opacity="0"><line y1="${m.t}" y2="${m.t + ih}" stroke="var(--axis)" stroke-width="1"/>`
+    + series.map((sv) => `<circle r="${sv.dash ? 3.5 : 5}" fill="var(${sv.cssVar})" stroke="var(--surface-1)" stroke-width="2"/>`).join("") + `</g>`;
+
+  clearPlot(plot);
+  plot.insertAdjacentHTML("afterbegin",
+    `<svg viewBox="0 0 ${W} ${H}" height="${H}" tabindex="0" role="img" aria-label="Projected net worth from ${baseYear} to ${yearOf(end)}, reaching ${money(end.net)} in ${unit}">${s}</svg>`);
+  const svg = plot.querySelector("svg");
+  fitAxisLabels(svg, W);
+  const hover = svg.querySelector("#projHover");
+  const dots = Array.prototype.slice.call(hover.querySelectorAll("circle"));
+  const show = (k) => {
+    const cx = X(k);
+    hover.setAttribute("opacity", "1");
+    hover.querySelector("line").setAttribute("x1", cx);
+    hover.querySelector("line").setAttribute("x2", cx);
+    dots.forEach((c, j) => { c.setAttribute("cx", cx); c.setAttribute("cy", Y(series[j].vals[k])); });
+    tip.innerHTML = `<div class="t-date">${yearOf(rows[k])}${k === 0 ? " · today" : ` · year ${k}`}</div>`
+      + series.map((sv, j) => (j === series.length - 1 ? `<div class="t-sep"></div>` : "")
+        + `<div class="t-row"><span class="nm"><span class="key" style="background: var(${sv.cssVar})"></span>${esc(sv.label)}</span><span class="vl">${money(sv.vals[k])}</span></div>`).join("");
+    const sc = plot.getBoundingClientRect().width / W;
+    placeTip(tip, plot, cx * sc, Math.max(0, Y(Math.max.apply(null, series.map((sv) => sv.vals[k]))) * sc - 12));
+  };
+  const hide = () => { hover.setAttribute("opacity", "0"); tip.style.opacity = "0"; };
+  svg.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * W;
+    show(Math.max(0, Math.min(n - 1, Math.round(((x - m.l) / iw) * (n - 1)))));
+  });
+  svg.addEventListener("mouseleave", hide);
+  svg.addEventListener("blur", hide);
+  let kb = n - 1;
+  svg.addEventListener("focus", () => show(kb));
+  svg.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") kb = Math.min(n - 1, kb + 1);
+    else if (e.key === "ArrowLeft") kb = Math.max(0, kb - 1);
+    else if (e.key === "Escape") { hide(); return; }
+    else return;
+    e.preventDefault(); show(kb);
+  });
+
+  // ── table ──
+  document.getElementById("projTableNote").textContent =
+    `Balances at the end of each year, in ${unit}. "Held flat" is everything outside the projected groups, net of debt.`;
+  const head = `<tr><th>Year</th>${P.groups.map((g) => `<th>${esc(g.label)}</th>`).join("")}<th>Held flat</th><th>Net worth</th><th>Contributed</th></tr>`;
+  const body = rows.map((r) => `<tr><td>${yearOf(r)}${r.year === 0 ? " (today)" : ""}</td>`
+    + r.groups.map((v) => `<td>${money(v)}</td>`).join("")
+    + `<td>${money(r.flat)}</td><td style="font-weight:600">${money(r.net)}</td><td>${money(r.contributed)}</td></tr>`).join("");
+  document.getElementById("projTableWrap").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+function setView(view) {
+  const isProj = view === "proj";
+  document.body.classList.toggle("view-proj", isProj);
+  document.getElementById("dashView").hidden = isProj;
+  document.getElementById("projView").hidden = !isProj;
+  document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+  // With no owners there's nothing left in the filter bar on this tab.
+  document.getElementById("filters").hidden = isProj && !OWNERS.length;
+  if (history.replaceState) history.replaceState(null, "", isProj ? "#projection" : location.pathname + location.search);
+  renderAll();
+}
+
 /* ── shell ─────────────────────────────────────────────────────────────── */
 function renderAll() {
   // Drop plotted series the current filters have emptied out.
@@ -1165,6 +1507,7 @@ function renderAll() {
   renderChange(idx);
   renderBoard(idx);
   renderTable(idx);
+  renderProjection();
 
   const closed = closedCount();
   const btn = document.getElementById("closedBtn");
@@ -1274,7 +1617,9 @@ document.getElementById("sourceNote").textContent =
   `${DATA.source} · ${ALL_DATES.length} snapshots through ${longDate(ALL_DATES[LAST])} · built ${DATA.generated}`;
 
 buildControls();
-renderAll();
+buildProjForm();
+document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+setView(location.hash === "#projection" ? "proj" : "dash");
 
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 140); });
