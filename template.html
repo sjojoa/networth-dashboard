@@ -199,6 +199,8 @@
   .acct .share { color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .acct .spark { margin-top: 10px; width: 100%; height: auto; }
   .acct.is-closed { opacity: 0.72; }
+  .acct .asof { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+  td.carried { color: var(--text-muted); font-style: italic; }
   .acct .plotbtn {
     position: absolute; right: 12px; bottom: 12px; font-size: 11px; padding: 3px 9px;
     min-height: 24px; border-radius: 7px; opacity: 0; transition: opacity .12s;
@@ -618,6 +620,22 @@ DATA.accounts.forEach((a) => {
     ? LIAB_VARS[LIABS_ALL.indexOf(a) % LIAB_VARS.length]
     : (catVar[a.category] || "--c-5");
 });
+/* A blank cell in the workbook carries the previous balance forward (see
+   carry_forward in build_dashboard.py). updatedIdx finds the snapshot a value
+   was actually entered on, so a carried balance can say how old it is. */
+DATA.accounts.forEach((a) => { a.carriedSet = new Set(a.carried || []); });
+function updatedIdx(a, i) {
+  let k = i;
+  while (k > 0 && a.carriedSet.has(k)) k--;
+  return k;
+}
+// Month and day, plus the year when it isn't the year of the comparison date.
+const asOfLabel = (a, i) => {
+  const d = ALL_DATES[updatedIdx(a, i)];
+  return asDate(d).getFullYear() === asDate(ALL_DATES[i]).getFullYear() ? shortDate(d) : longDate(d);
+};
+const isStale = (a, i) => !a.closed && a.carriedSet.has(i);
+
 const ALL_CARDS = LIABS_ALL.length && LIABS_ALL.every((a) => /card/i.test(a.name));
 // The chart stacks positive amounts owed; the tile shows the signed balance.
 const OWED_LABEL = ALL_CARDS ? "Card balances owed" : "Balances owed";
@@ -1100,6 +1118,9 @@ function renderBoard(idx) {
         // Account cards always carry both figures, whatever the $/% switch says.
         + `<div class="meta"><span class="${dirClass(d)}">${arrow(d)} ${bothWays(d, dPct, false)}</span>`
         + `<span class="share">${a.closed && a.lastHeld ? "last held " + shortDate(a.lastHeld) : shareTxt}</span></div>`
+        + (isStale(a, a1)
+            ? `<div class="asof" title="Not updated on ${longDate(ALL_DATES[a1])} — showing the balance entered on ${longDate(ALL_DATES[updatedIdx(a, a1)])}">Updated ${asOfLabel(a, a1)}</div>`
+            : "")
         + sparkline(idx.map((i) => a.series[i]), a.cssVar)
         + `<button type="button" class="plotbtn" data-plot="${esc(key)}" aria-pressed="${on}"${full ? " disabled" : ""}`
         + ` title="${on ? "Remove from the chart" : "Plot this account on the chart"}">${on ? "Plotted" : "Plot"}</button>`
@@ -1110,7 +1131,8 @@ function renderBoard(idx) {
 
   document.getElementById("board").innerHTML = html || `<div class="empty">No accounts match this filter.</div>`;
   document.getElementById("boardNote").textContent =
-    `${plural(list.length, "account")} · values as of ${longDate(ALL_DATES[a1])} · change and sparkline over the selected range · hover a card to plot it on the chart`;
+    `${plural(list.length, "account")} · values as of ${longDate(ALL_DATES[a1])} · change and sparkline over the selected range · hover a card to plot it on the chart`
+    + (list.some((a) => isStale(a, a1)) ? ` · "Updated" marks a balance not entered on that date, carried forward from its last entry` : "");
 }
 
 /* ── tiles ─────────────────────────────────────────────────────────────── */
@@ -1161,15 +1183,19 @@ function renderTiles(idx) {
 function renderTable(idx) {
   const list = listed();
   const hidden = counted().length - list.length;
+  const anyCarried = list.some((a) => idx.some((i) => a.carriedSet.has(i)));
   document.getElementById("tableNote").textContent =
     "Every value in the workbook for the current filters. Δ is the change in net worth from the previous snapshot."
+    + (anyCarried ? " Grey italic values were left blank that week and carry the previous entry forward." : "")
     + (hidden ? ` ${plural(hidden, "closed account")} not shown as a column, but still counted in net worth.` : "");
   const head = `<tr><th>Date</th>${list.map((a) => `<th>${esc(a.name)}</th>`).join("")}<th>Net worth</th><th>Δ</th></tr>`;
   const body = idx.map((i, k) => {
     const net = netAt(i);
     const d = k > 0 ? net - netAt(idx[k - 1]) : null;
     return `<tr><td>${longDate(ALL_DATES[i])}</td>`
-      + list.map((a) => `<td>${money(a.series[i])}</td>`).join("")
+      + list.map((a) => (a.carriedSet.has(i)
+          ? `<td class="carried" title="Blank in the workbook — carried forward from ${longDate(ALL_DATES[updatedIdx(a, i)])}">${money(a.series[i])}</td>`
+          : `<td>${money(a.series[i])}</td>`)).join("")
       + `<td style="font-weight:600">${money(net)}</td>`
       + `<td class="${d === null ? "flat" : dirClass(d)}">${d === null ? "–" : signed(d)}</td></tr>`;
   }).join("");
@@ -1321,7 +1347,7 @@ function renderProjForm() {
       body = accts.map((a) =>
         `<div class="proj-acct"><div class="hd">`
         + `<span class="anm">${esc(a.name)}${a.owner && state.owner === "all" ? ` <span class="chip" style="--own: var(${ownerVar(a.owner)})"><span class="dot"></span>${esc(a.owner)}</span>` : ""}</span>`
-        + `<span class="bal">${money(a.series[LAST])}</span></div>`
+        + `<span class="bal">${money(a.series[LAST])}${isStale(a, LAST) ? ` · updated ${asOfLabel(a, LAST)}` : ""}</span></div>`
         + `<div class="fields">`
         + numField("Monthly", "data-acct-monthly", a.name, acctMonthly(a) || "", "$", `min="0" step="50"`)
         + numField("Annual return", "data-acct-return", a.name, acctReturn(a), "%", `min="-50" max="50" step="0.1"`)

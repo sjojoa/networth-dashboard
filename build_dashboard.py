@@ -128,6 +128,28 @@ def category_for(name, series, explicit_category):
     return "Other assets"
 
 
+def is_blank(value):
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def carry_forward(raw):
+    """A blank cell means "not updated this time", not $0 — so people can update
+    on different schedules (one weekly, one monthly) on the same sheet. Blanks
+    take the account's last entered balance; blanks before its first entry are
+    $0, since the account didn't exist yet. A typed 0 is still a real $0.
+    Returns (series, carried) where carried lists the row indices filled in."""
+    series, carried, last = [], [], None
+    for i, v in enumerate(raw):
+        if is_blank(v):
+            if last is not None:
+                carried.append(i)
+            series.append(last if last is not None else 0.0)
+        else:
+            last = round(float(v), 2)
+            series.append(last)
+    return series, carried
+
+
 def closed_state(series):
     """An account is closed once it has been $0 for the last few snapshots after
     having held a balance — a rolled-over 401k, say. Returns (closed, last index
@@ -180,17 +202,17 @@ def extract(xlsx_path):
         if not isinstance(raw_date, (datetime.datetime, datetime.date)):
             continue
         values = [sheet.cell(row, c["col"]).value for c in columns]
-        if all(v in (None, 0) for v in values):
+        if all(is_blank(v) or v == 0 for v in values):
             continue  # empty template row
         dates.append(raw_date.strftime("%Y-%m-%d"))
-        rows.append([round(float(v or 0), 2) for v in values])
+        rows.append(values)
 
     if not dates:
         raise SystemExit(f"No dated rows found in {xlsx_path}")
 
     accounts = []
     for i, c in enumerate(columns):
-        series = [r[i] for r in rows]
+        series, carried = carry_forward([r[i] for r in rows])
         closed, last_held = closed_state(series)
         accounts.append({
             "name": c["name"],
@@ -200,6 +222,7 @@ def extract(xlsx_path):
             "closed": closed,
             "lastHeld": dates[last_held] if last_held is not None else None,
             "series": series,
+            "carried": carried,
         })
 
     owners = [{"name": n, "accounts": sum(1 for a in accounts if a["owner"] == n)} for n in owner_names]
@@ -252,6 +275,9 @@ def main():
     print(f"  categories: " + ", ".join(data["categoryOrder"]))
     if closed:
         print(f"  closed: " + ", ".join(closed))
+    stale = [a["name"] for a in data["accounts"] if a["carried"] and a["carried"][-1] == len(data["dates"]) - 1]
+    if stale:
+        print(f"  carried forward to the latest snapshot: " + ", ".join(stale))
     print(f"  latest ({data['dates'][-1]}): ${latest:,.2f}")
 
 

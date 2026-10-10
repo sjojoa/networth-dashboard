@@ -182,6 +182,11 @@ Rules worth knowing:
   worth, and appear in the "balances owed" chart as positive amounts so a shorter
   bar plainly means less debt.
 - Snapshots don't have to be weekly or evenly spaced. Blank rows are skipped.
+- **A blank cell means "not updated this time"**, so people can update on
+  different schedules — one weekly, one monthly — on the same sheet. A blank
+  carries the account's last entered balance forward (blanks before its first
+  entry count as $0). The account card then says `Updated Jul 31`, and the
+  table shows carried values in grey italics. A typed `0` is still a real $0.
 
 ### Categorising an account
 
@@ -203,7 +208,7 @@ Anything unmatched lands in "Other assets" and still appears everywhere.
 
 ### Retiring an account
 
-Leave the column in place and let it go to `0`. After three consecutive `$0`
+Leave the column in place and enter `0` — a blank won't do it, since blanks carry the last balance forward. After three consecutive `$0`
 snapshots following a real balance, it's marked closed: it disappears from the
 cards, table columns, change chart and series picker, but **keeps counting toward
 every total for the period it existed**, so history never changes. The filter bar
