@@ -53,6 +53,8 @@
   }
 
   * { box-sizing: border-box; }
+  /* Classes below set display (grid, flex); without this they'd override the hidden attribute. */
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     background: var(--page);
@@ -283,6 +285,15 @@
     outline: none; width: 100%; min-width: 0; padding: 6px 0; font-variant-numeric: tabular-nums;
   }
   .proj-globals { padding-top: 14px; }
+  .proj-sub { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 18px; }
+  .loan-sum { font-size: 12px; color: var(--text-secondary); margin-top: 8px; line-height: 1.45; }
+  .loan-sum.warn { color: var(--down); }
+  .loan-mode { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+  .loan-mode .seg button { font-size: 12px; padding: 3px 10px; min-height: 26px; }
+  .fld select {
+    font: inherit; font-size: 13px; color: var(--text-primary); background: none; border: none;
+    outline: none; width: 100%; min-width: 0; padding: 6px 0;
+  }
   .adv {
     display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
     font-size: 12px; color: var(--text-secondary); cursor: pointer;
@@ -1413,12 +1424,12 @@ const PROJ_GROUPS = [
 const PROJ_KEY = "nw-projection";
 const projVar = (cat) => catVar[cat] || CATEGORY_VAR_FIXED[cat] || "--c-5";
 const proj = (() => {
-  const base = { years: 30, inflation: 3, real: false, raiseOn: false, raisePct: 3, returns: {}, monthly: {}, advanced: {}, acctReturns: {}, acctMonthly: {} };
+  const base = { years: 30, inflation: 3, real: false, raiseOn: false, raisePct: 3, returns: {}, monthly: {}, advanced: {}, acctReturns: {}, acctMonthly: {}, loans: {}, appreciation: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(PROJ_KEY));
     if (saved && typeof saved === "object") Object.assign(base, saved);
   } catch (e) { /* storage blocked or corrupt — fall back to defaults */ }
-  ["returns", "monthly", "advanced", "acctReturns", "acctMonthly"].forEach((k) => {
+  ["returns", "monthly", "advanced", "acctReturns", "acctMonthly", "loans", "appreciation"].forEach((k) => {
     if (!base[k] || typeof base[k] !== "object") base[k] = {};
   });
   PROJ_GROUPS.forEach((g) => { if (!isFinite(base.returns[g.cat])) base.returns[g.cat] = g.ret; });
@@ -1439,6 +1450,95 @@ function monthlyFor(cat) {
 const projAccounts = (cat) => counted().filter((a) => a.category === cat && !a.closed);
 const acctReturn = (a) => (isFinite(proj.acctReturns[a.name]) ? proj.acctReturns[a.name] : proj.returns[a.category]);
 const acctMonthly = (a) => (isFinite(proj.acctMonthly[a.name]) ? proj.acctMonthly[a.name] : 0);
+
+/* ── loans & property ──────────────────────────────────────────────────────
+   A fixed-rate loan's future depends only on today's balance, the rate and
+   the payment — so the balance from the sheet is the starting point and no
+   original loan amount is needed, wherever you are in the loan. Interest is
+   the annual rate / 12 on the balance each month (how US mortgages accrue);
+   the payment is principal + interest only, since escrow never touches the
+   balance. Credit cards have no schedule, so they aren't offered.          */
+const LOAN_DEFAULT = { on: false, rate: null, mode: "payment", payment: null, years: null, extra: 0, invest: false, target: "grp:Taxable investing" };
+const loanOf = (name) => Object.assign({}, LOAN_DEFAULT, proj.loans[name] || {});
+const setLoan = (name, patch) => { proj.loans[name] = Object.assign(loanOf(name), patch); };
+const loanAccounts = () => counted().filter((a) => a.isLiability && !a.closed && !/card/i.test(a.name) && a.series[LAST] < -CENT);
+const propertyAccounts = () => counted().filter((a) => a.category === "Property" && !a.isLiability && !a.closed);
+const appreciationOf = (a) => (isFinite(proj.appreciation[a.name]) ? proj.appreciation[a.name] : 0);
+
+/* The regular monthly payment: as typed, or — from years left — the payment
+   that clears the balance in exactly that many months. */
+function loanPayment(loan, owed) {
+  if (!isFinite(loan.rate) || loan.rate < 0) return null;
+  if (loan.mode === "years") {
+    const n = Math.round(loan.years * 12);
+    if (!(n > 0)) return null;
+    const i = loan.rate / 1200;
+    return i ? (owed * i) / (1 - Math.pow(1 + i, -n)) : owed / n;
+  }
+  return loan.payment > 0 ? loan.payment : null;
+}
+// Months to payoff and the interest paid getting there, or null if the payment
+// never outruns the interest.
+function loanSchedule(owed, rate, pay) {
+  const i = rate / 1200;
+  if (pay <= owed * i + 1e-9) return null;
+  let m = 0, interest = 0;
+  while (owed > CENT && m < 1200) {
+    const int = owed * i;
+    interest += int;
+    owed = owed + int - Math.min(pay, owed + int);
+    m++;
+  }
+  return { months: m, interest };
+}
+const yearsMonths = (months) => {
+  const y = Math.floor(months / 12), mo = months % 12;
+  return [y ? plural(y, "yr") : "", mo ? mo + " mo" : ""].filter(Boolean).join(" ") || "0 mo";
+};
+const monthAfter = (months) => {
+  const d = asDate(ALL_DATES[LAST]);
+  return new Date(d.getFullYear(), d.getMonth() + months, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+};
+function loanSummary(a) {
+  const loan = loanOf(a.name), owed = -a.series[LAST];
+  const base = loanPayment(loan, owed);
+  if (base === null) {
+    return { warn: false, text: loan.mode === "years"
+      ? "Enter the interest rate and the years left to model this loan. Until then it's held at today's balance."
+      : "Enter the interest rate and your monthly payment (principal + interest) to model this loan. Until then it's held at today's balance." };
+  }
+  const extra = loan.extra > 0 ? loan.extra : 0;
+  const sched = loanSchedule(owed, loan.rate, base + extra);
+  if (!sched) {
+    return { warn: true, text: `At ${money(base + extra)}/mo the balance never falls: a month's interest is ${money(owed * loan.rate / 1200)}. Check the rate, or that the payment is principal + interest.` };
+  }
+  let text = (loan.mode === "years" ? `Payment ${money(base)}/mo (principal + interest). ` : "")
+    + `Paid off ${monthAfter(sched.months)} (${yearsMonths(sched.months)}) · ${money(sched.interest)} interest left to pay`;
+  if (extra) {
+    const plain = loanSchedule(owed, loan.rate, base);
+    if (plain) text += ` · the extra ${money(extra)}/mo saves ${yearsMonths(plain.months - sched.months)} and ${money(plain.interest - sched.interest)} in interest`;
+    else text += ` · without the extra ${money(extra)}/mo it would never be paid off`;
+  }
+  return { warn: false, text: text + "." };
+}
+// Where a paid-off loan's payment goes: a group, or one account when that
+// group is set per account.
+function targetOptions() {
+  const out = [];
+  PROJ_GROUPS.forEach((g) => {
+    if (proj.advanced[g.cat]) projAccounts(g.cat).forEach((a) => out.push({ value: "acct:" + a.name, label: `${g.label} · ${a.name}` }));
+    else out.push({ value: "grp:" + g.cat, label: g.label });
+  });
+  return out;
+}
+function resolveTarget(target) {
+  const opts = targetOptions();
+  if (opts.some((o) => o.value === target)) return target;
+  const cat = target.indexOf("grp:") === 0 ? target.slice(4)
+    : ((DATA.accounts.find((a) => "acct:" + a.name === target) || {}).category || "Taxable investing");
+  const inCat = opts.find((o) => o.value === "grp:" + cat) || opts.find((o) => o.value.indexOf("acct:") === 0 && projAccounts(cat).some((a) => "acct:" + a.name === o.value));
+  return (inCat || opts[0] || { value: "grp:Taxable investing" }).value;
+}
 
 /* Switching a group to per-account starts each account from the group's
    settings: its return, and an even share of the monthly contribution — so
@@ -1491,7 +1591,56 @@ function renderProjForm() {
       + `<label class="adv"><input type="checkbox" data-adv="${esc(g.cat)}"${adv ? " checked" : ""}${accts.length ? "" : (adv ? "" : " disabled")}>`
       + `Set per account${accts.length ? ` <span class="flat">(${plural(accts.length, "account")})</span>` : ""}</label>`
       + body + `</div>`;
-  }).join("");
+  }).join("") + renderLoanForm();
+}
+
+function renderLoanForm() {
+  let html = "";
+  const loans = loanAccounts();
+  if (loans.length) {
+    html += `<div class="proj-sub">Loans</div>`;
+    loans.forEach((a) => {
+      const loan = loanOf(a.name);
+      html += `<div class="proj-group"><div class="hd"><span class="nm"><span class="dot" style="background: var(${a.cssVar})"></span>${esc(a.name)}</span>`
+        + `<span class="bal">${money(a.series[LAST])} today${isStale(a, LAST) ? ` · updated ${asOfLabel(a, LAST)}` : ""}</span></div>`
+        + `<label class="adv"><input type="checkbox" data-loan-on="${esc(a.name)}"${loan.on ? " checked" : ""}>Model as a loan (fixed rate)</label>`;
+      if (loan.on) {
+        const byYears = loan.mode === "years";
+        html += `<div class="loan-mode">I know the<div class="seg">`
+          + `<button type="button" data-loan-mode="payment" data-loan="${esc(a.name)}" aria-pressed="${!byYears}">Monthly payment</button>`
+          + `<button type="button" data-loan-mode="years" data-loan="${esc(a.name)}" aria-pressed="${byYears}">Years left</button></div></div>`
+          + `<div class="fields">`
+          + numField("Interest rate", "data-loan-rate", a.name, loan.rate === null ? "" : loan.rate, "%/yr", `min="0" max="30" step="0.125"`)
+          + (byYears
+              ? numField("Years left", "data-loan-years", a.name, loan.years === null ? "" : loan.years, "yrs", `min="0" max="50" step="0.5"`)
+              : numField("Payment (principal + interest)", "data-loan-payment", a.name, loan.payment === null ? "" : loan.payment, "$", `min="0" step="50"`))
+          + numField("Extra principal / month", "data-loan-extra", a.name, loan.extra || "", "$", `min="0" step="50"`)
+          + `</div>`
+          + `<div class="loan-sum" data-loan-sum="${esc(a.name)}"></div>`
+          + `<label class="adv"><input type="checkbox" data-loan-invest="${esc(a.name)}"${loan.invest ? " checked" : ""}>After payoff, invest the payment</label>`;
+        if (loan.invest) {
+          const target = resolveTarget(loan.target);
+          html += `<div class="fields"><label class="fld" style="grid-column: 1 / -1"><span>Invest it in</span><span class="in">`
+            + `<select data-loan-target="${esc(a.name)}">`
+            + targetOptions().map((o) => `<option value="${esc(o.value)}"${o.value === target ? " selected" : ""}>${esc(o.label)}</option>`).join("")
+            + `</select></span></label></div>`;
+        }
+      }
+      html += `</div>`;
+    });
+  }
+  const props = propertyAccounts();
+  if (props.length) {
+    html += `<div class="proj-sub">Property</div>`;
+    props.forEach((a) => {
+      html += `<div class="proj-group"><div class="hd"><span class="nm"><span class="dot" style="background: var(${a.cssVar})"></span>${esc(a.name)}</span>`
+        + `<span class="bal">${money(a.series[LAST])} today${isStale(a, LAST) ? ` · updated ${asOfLabel(a, LAST)}` : ""}</span></div>`
+        + `<div class="fields">`
+        + numField("Value change", "data-appr", a.name, appreciationOf(a) || "", "%/yr", `min="-50" max="50" step="0.5" placeholder="0"`)
+        + `</div></div>`;
+    });
+  }
+  return html;
 }
 
 function buildProjForm() {
@@ -1513,11 +1662,30 @@ function buildProjForm() {
       proj.inflation = clampNum(el.value, 0, 20, 0);
     } else if (el.id === "projRaisePct") {
       proj.raisePct = clampNum(el.value, 0, 50, 0);
+    } else if (d.loanRate || d.loanPayment || d.loanYears || d.loanExtra) {
+      const name = d.loanRate || d.loanPayment || d.loanYears || d.loanExtra;
+      const blank = el.value.trim() === "";
+      if (d.loanRate) setLoan(name, { rate: blank ? null : clampNum(el.value, 0, 30, null) });
+      else if (d.loanPayment) setLoan(name, { payment: blank ? null : clampNum(el.value, 0, 1e8, null) });
+      else if (d.loanYears) setLoan(name, { years: blank ? null : clampNum(el.value, 0, 50, null) });
+      else setLoan(name, { extra: clampNum(el.value, 0, 1e8, 0) });
+    } else if (d.appr) {
+      proj.appreciation[d.appr] = clampNum(el.value, -50, 50, 0);
     } else return;
     saveProj();
     renderProjection();
   });
   view.addEventListener("change", (e) => {
+    const d = e.target.dataset;
+    if (d.loanOn || d.loanInvest || d.loanTarget) {
+      if (d.loanOn) setLoan(d.loanOn, { on: e.target.checked });
+      else if (d.loanInvest) setLoan(d.loanInvest, { invest: e.target.checked });
+      else setLoan(d.loanTarget, { target: e.target.value });
+      saveProj();
+      if (!d.loanTarget) projFormKey = null;
+      renderProjection();
+      return;
+    }
     if (e.target.id === "projRaiseOn") {
       proj.raiseOn = e.target.checked;
       document.getElementById("projRaiseFields").hidden = !proj.raiseOn;
@@ -1531,6 +1699,14 @@ function buildProjForm() {
     if (e.target.checked) seedAccounts(cat);
     saveProj();
     projFormKey = null;          // the form's shape changed; rebuild it
+    renderProjection();
+  });
+  view.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-loan-mode]");
+    if (!b) return;
+    setLoan(b.dataset.loan, { mode: b.dataset.loanMode });
+    saveProj();
+    projFormKey = null;
     renderProjection();
   });
   document.querySelectorAll("[data-real]").forEach((b) => {
@@ -1552,7 +1728,10 @@ function buildProjForm() {
    rewrites the field under them. */
 let projFormKey = null;
 function syncProjInputs() {
-  const key = state.owner + "|" + PROJ_GROUPS.map((g) => (proj.advanced[g.cat] ? 1 : 0)).join("");
+  const key = state.owner + "|" + PROJ_GROUPS.map((g) => (proj.advanced[g.cat] ? 1 : 0)).join("")
+    + "|" + loanAccounts().map((a) => { const l = loanOf(a.name); return [a.name, l.on, l.mode, l.invest].join(":"); }).join(",")
+    + "|" + propertyAccounts().map((a) => a.name).join(",")
+    + "|" + excludedHere().map((a) => a.name).join(",");
   if (projFormKey === key) return;
   projFormKey = key;
   renderProjForm();
@@ -1563,7 +1742,12 @@ function syncProjInputs() {
    every figure is divided by cumulative inflation to that month. A group is
    one pot, or — set per account — one pot per account, summed. With yearly
    increases on, every contribution steps up once a year, like a raise: year 1
-   pays the amounts as typed, year 2 pays them × (1 + increase), and so on. */
+   pays the amounts as typed, year 2 pays them × (1 + increase), and so on.
+   Property grows at its own rate. A modelled loan accrues a month's interest,
+   then takes its payment; principal paid counts as money put in, like a
+   contribution. Once it's paid off, an "invest the payment" loan sends its
+   full payment to the chosen pot from the following month — a fixed amount,
+   since it's money you were already spending. */
 function project() {
   const grouped = PROJ_GROUPS.map((g) => g.cat);
   const rate = (pctPerYear) => Math.pow(1 + pctPerYear / 100, 1 / 12);
@@ -1572,15 +1756,30 @@ function project() {
     const all = counted().filter((a) => a.category === g.cat);
     const start = sumAt(all, LAST);
     const pots = adv
-      ? projAccounts(g.cat).map((a) => ({ start: a.series[LAST], monthly: acctMonthly(a), growth: rate(acctReturn(a)) }))
-      : [{ start, monthly: monthlyFor(g.cat), growth: rate(proj.returns[g.cat]) }];
+      ? projAccounts(g.cat).map((a) => ({ name: a.name, start: a.series[LAST], monthly: acctMonthly(a), growth: rate(acctReturn(a)) }))
+      : [{ name: null, start, monthly: monthlyFor(g.cat), growth: rate(proj.returns[g.cat]) }];
     return {
       cat: g.cat, label: g.label, cssVar: projVar(g.cat), adv, start, pots,
       monthly: pots.reduce((t, p) => t + p.monthly, 0),
     };
   });
-  const flat = sumAt(counted().filter((a) => grouped.indexOf(a.category) < 0), LAST);
-  const startNet = flat + groups.reduce((t, g) => t + g.start, 0);
+  const props = propertyAccounts().map((a) => ({ name: a.name, bal: a.series[LAST], growth: rate(appreciationOf(a)), pct: appreciationOf(a) }));
+  const loans = loanAccounts().filter((a) => loanOf(a.name).on).map((a) => {
+    const loan = loanOf(a.name), owed = -a.series[LAST], base = loanPayment(loan, owed);
+    if (base === null) return null;                        // incomplete: held flat
+    const pay = base + (loan.extra > 0 ? loan.extra : 0);
+    let to = null;
+    if (loan.invest) {
+      const t = resolveTarget(loan.target);
+      groups.forEach((g, j) => g.pots.forEach((p, k) => {
+        if ((t === "grp:" + g.cat && !g.adv) || (p.name && t === "acct:" + p.name)) to = { j, k };
+      }));
+    }
+    return { name: a.name, owed, i: loan.rate / 1200, pay, to, paidOff: null };
+  }).filter(Boolean);
+  const modelled = props.map((x) => x.name).concat(loans.map((x) => x.name));
+  const flat = sumAt(counted().filter((a) => grouped.indexOf(a.category) < 0 && modelled.indexOf(a.name) < 0), LAST);
+  const startNet = sumAt(counted(), LAST);
   const deflator = (m) => (proj.real ? Math.pow(1 + proj.inflation / 100, m / 12) : 1);
   const perMonth = groups.reduce((t, g) => t + g.monthly, 0);
   const raise = proj.raiseOn ? 1 + proj.raisePct / 100 : 1;
@@ -1589,22 +1788,42 @@ function project() {
   // Closed accounts are left out of the pots but hold $0, so group totals still match.
   const bal = groups.map((g) => g.pots.map((p) => p.start));
   const groupSum = (j) => bal[j].reduce((a, b) => a + b, 0);
-  let contributed = 0;               // in the display units, so the pieces add up
+  const redirect = groups.map((g) => g.pots.map(() => 0));   // payments freed by payoffs
+  let contributed = 0, paidDown = 0;   // in the display units, so the pieces add up
   const rows = [];
   const snap = (m) => {
     const d = deflator(m);
     const vals = groups.map((_, j) => groupSum(j) / d);
-    const net = flat / d + vals.reduce((a, b) => a + b, 0);
-    rows.push({ year: m / 12, groups: vals, flat: flat / d, net, contributed, baseline: startNet + contributed });
+    const prop = props.reduce((t, x) => t + x.bal, 0) / d;
+    const owed = -loans.reduce((t, x) => t + x.owed, 0) / d;
+    const net = flat / d + vals.reduce((a, b) => a + b, 0) + prop + owed;
+    rows.push({ year: m / 12, groups: vals, prop, loans: owed, flat: flat / d, net, contributed, paidDown,
+      baseline: startNet + contributed + paidDown });
   };
   snap(0);
   for (let m = 1; m <= proj.years * 12; m++) {
-    const f = stepUp(m);
-    groups.forEach((g, j) => g.pots.forEach((p, k) => { bal[j][k] = bal[j][k] * p.growth + p.monthly * f; }));
-    contributed += (perMonth * f) / deflator(m);
+    const f = stepUp(m), d = deflator(m);
+    let freed = 0;
+    groups.forEach((g, j) => g.pots.forEach((p, k) => {
+      bal[j][k] = bal[j][k] * p.growth + p.monthly * f + redirect[j][k];
+      freed += redirect[j][k];
+    }));
+    contributed += (perMonth * f + freed) / d;
+    props.forEach((x) => { x.bal *= x.growth; });
+    loans.forEach((x) => {
+      if (x.owed <= CENT) return;
+      const interest = x.owed * x.i, pay = Math.min(x.pay, x.owed + interest);
+      x.owed += interest - pay;
+      paidDown += (pay - interest) / d;
+      if (x.owed <= CENT) {
+        x.owed = 0;
+        x.paidOff = m;
+        if (x.to) redirect[x.to.j][x.to.k] += x.pay;      // from next month on
+      }
+    });
     if (m % 12 === 0) snap(m);
   }
-  return { groups, flat, startNet, perMonth, finalMonthly: perMonth * stepUp(proj.years * 12), rows };
+  return { groups, props, loans, flat, startNet, perMonth, finalMonthly: perMonth * stepUp(proj.years * 12), rows };
 }
 
 function renderProjection() {
@@ -1622,21 +1841,41 @@ function renderProjection() {
     + (state.owner === "all" ? " for everyone." : ` for ${state.owner}.`)
     + (excludedHere().length ? ` Excluding ${excludedLabel(excludedHere())}.` : "")
     + (OWNERS.length > 1 ? " Group contributions are saved separately for each owner view; per-account settings stay with the account." : "");
-  const others = CATEGORIES.filter((c) => PROJ_GROUPS.every((g) => g.cat !== c) && counted().some((a) => a.category === c));
+  document.querySelectorAll("[data-loan-sum]").forEach((el) => {
+    const a = DATA.accounts.find((x) => x.name === el.dataset.loanSum);
+    if (!a) return;
+    const sum = loanSummary(a);
+    el.textContent = sum.text;
+    el.classList.toggle("warn", sum.warn);
+  });
+  const modelled = P.props.map((x) => x.name).concat(P.loans.map((x) => x.name));
+  const flatAccts = counted().filter((a) => PROJ_GROUPS.every((g) => g.cat !== a.category) && modelled.indexOf(a.name) < 0);
+  const others = CATEGORIES.filter((c) => flatAccts.some((a) => a.category === c));
   document.getElementById("projFlatNote").textContent = others.length
-    ? `${others.join(", ")} (${money(P.flat)} combined) ${others.length === 1 ? "is" : "are"} held at today's balance${proj.real ? ", so inflation erodes their value in today's dollars" : ""}.`
+    ? `${others.join(", ")} (${money(P.flat)} combined${P.loans.length && LIAB_CATS.some((c) => others.indexOf(c) >= 0) ? ", not counting modelled loans" : ""}) ${others.length === 1 ? "is" : "are"} held at today's balance${proj.real ? ", so inflation erodes their value in today's dollars" : ""}.`
     : "";
 
-  // Tiles: start + contributions + growth = projected, all in the same units.
+  // Tiles: start + contributions + paydown + growth = projected, in the same units.
   const growth = end.net - end.baseline;
+  const propMoves = P.props.some((x) => x.pct !== 0);
+  const freedLoans = P.loans.filter((x) => x.to && x.paidOff !== null);
+  const freedNote = freedLoans.length
+    ? ` + ${money(freedLoans.reduce((t, x) => t + x.pay, 0))}/mo from ${monthAfter(Math.min.apply(null, freedLoans.map((x) => x.paidOff)) + 1)}`
+    : "";
+  const paidOffIn = P.loans.filter((x) => x.paidOff !== null);
   const tiles = [
     { label: `Net worth in ${yearOf(end)}`, value: money(end.net), sub: `from ${money(P.startNet)} today` },
-    { label: "Contributions", value: money(end.contributed), sub: proj.raiseOn && proj.raisePct > 0 && P.perMonth > 0
+    { label: "Contributions", value: money(end.contributed), sub: (proj.raiseOn && proj.raisePct > 0 && P.perMonth > 0
       ? `${money(P.perMonth)} → ${money(P.finalMonthly)}/mo`
-      : `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}` },
-    { label: proj.real ? "Growth after inflation" : "Investment growth", value: signed(growth), cls: dirClass(growth),
-      sub: end.contributed + Math.abs(P.startNet) > 0 ? `${(growth / Math.max(1, end.net) * 100).toFixed(0)}% of the projected total` : "" },
-  ].concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: g.adv
+      : `${money(P.perMonth)}/mo for ${plural(proj.years, "year")}`) + freedNote },
+  ].concat(P.loans.length ? [{ label: "Loans paid down", value: money(end.paidDown),
+      sub: paidOffIn.length === P.loans.length
+        ? (P.loans.length === 1 ? `${P.loans[0].name} paid off ${monthAfter(P.loans[0].paidOff)}` : `all paid off by ${monthAfter(Math.max.apply(null, P.loans.map((x) => x.paidOff)))}`)
+        : `${money(-end.loans)} still owed in ${yearOf(end)}` }] : [])
+  .concat([
+    { label: proj.real ? "Growth after inflation" : (propMoves ? "Growth" : "Investment growth"), value: signed(growth), cls: dirClass(growth),
+      sub: (propMoves ? "markets and property · " : "") + (end.contributed + Math.abs(P.startNet) > 0 ? `${(growth / Math.max(1, end.net) * 100).toFixed(0)}% of the projected total` : "") },
+  ]).concat(P.groups.map((g, j) => ({ label: g.label, value: money(end.groups[j]), sub: g.adv
       ? `${plural(g.pots.length, "account")} · ${money(g.monthly)}/mo`
       : `${proj.returns[g.cat]}%/yr · ${money(g.monthly)}/mo` })));
   document.getElementById("projTiles").innerHTML = tiles.map((t) =>
@@ -1647,12 +1886,14 @@ function renderProjection() {
   document.getElementById("projNote").textContent =
     `${baseYear} → ${yearOf(end)} in ${unit} · compounded monthly, contributions at month end`
     + (proj.raiseOn && proj.raisePct > 0 ? `, rising ${proj.raisePct}% each year` : "")
+    + (P.loans.length ? ` · ${P.loans.map((x) => x.name).join(", ")} paid down monthly` : "")
     + (proj.real ? ` · ${proj.inflation}%/yr inflation` : "");
 
   // ── chart ──
   const series = [{ label: "Net worth", cssVar: "--c-1", vals: rows.map((r) => r.net) }]
     .concat(P.groups.map((g, j) => ({ label: g.label, cssVar: g.cssVar, vals: rows.map((r) => r.groups[j]) })))
-    .concat([{ label: "Today + contributions", cssVar: "--text-muted", dash: true, vals: rows.map((r) => r.baseline) }]);
+    .concat(P.loans.length ? [{ label: P.loans.length === 1 ? P.loans[0].name : "Loans", cssVar: "--c-8", vals: rows.map((r) => r.loans) }] : [])
+    .concat([{ label: P.loans.length ? "Today + contributions + paydown" : "Today + contributions", cssVar: "--text-muted", dash: true, vals: rows.map((r) => r.baseline) }]);
   document.getElementById("projLegend").innerHTML = series.map((sv) =>
     `<span class="item"><span class="ln" style="background: ${sv.dash ? `repeating-linear-gradient(90deg, var(${sv.cssVar}) 0 4px, transparent 4px 7px)` : `var(${sv.cssVar})`}"></span>${esc(sv.label)}</span>`).join("");
 
@@ -1689,6 +1930,12 @@ function renderProjection() {
       placed.push(y);
       s += `<text class="mark-label" x="${(X(n - 1) + 10).toFixed(1)}" y="${(y + 4).toFixed(1)}">${axisMoney(sv.vals[n - 1])}</text>`;
     }
+  });
+  // Payoff markers: a hairline at the month each loan clears, labelled at the top.
+  P.loans.filter((x) => x.paidOff !== null).forEach((x, j) => {
+    const px = X(x.paidOff / 12);
+    s += `<line x1="${px.toFixed(1)}" y1="${m.t}" x2="${px.toFixed(1)}" y2="${m.t + ih}" stroke="var(--axis)" stroke-width="1" stroke-dasharray="2 3"/>`;
+    s += `<text class="tick" data-x x="${(px + 5).toFixed(1)}" y="${(m.t + 10 + j * 13).toFixed(1)}">${esc(x.name)} paid off ${monthAfter(x.paidOff)}</text>`;
   });
   const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 52))));
   rows.forEach((r, k) => {
@@ -1738,12 +1985,18 @@ function renderProjection() {
   });
 
   // ── table ──
+  const hasProp = P.props.length > 0, hasLoans = P.loans.length > 0;
   document.getElementById("projTableNote").textContent =
-    `Balances at the end of each year, in ${unit}. "Held flat" is everything outside the projected groups, net of debt.`;
-  const head = `<tr><th>Year</th>${P.groups.map((g) => `<th>${esc(g.label)}</th>`).join("")}<th>Held flat</th><th>Net worth</th><th>Contributed</th></tr>`;
+    `Balances at the end of each year, in ${unit}. "Held flat" is everything else, net of any debt not modelled as a loan.`
+    + (hasLoans ? ` "Paid down" is loan principal repaid so far.` : "");
+  const head = `<tr><th>Year</th>${P.groups.map((g) => `<th>${esc(g.label)}</th>`).join("")}`
+    + (hasProp ? `<th>Property</th>` : "") + (hasLoans ? `<th>Loans</th>` : "")
+    + `<th>Held flat</th><th>Net worth</th><th>Contributed</th>` + (hasLoans ? `<th>Paid down</th>` : "") + `</tr>`;
   const body = rows.map((r) => `<tr><td>${yearOf(r)}${r.year === 0 ? " (today)" : ""}</td>`
     + r.groups.map((v) => `<td>${money(v)}</td>`).join("")
-    + `<td>${money(r.flat)}</td><td style="font-weight:600">${money(r.net)}</td><td>${money(r.contributed)}</td></tr>`).join("");
+    + (hasProp ? `<td>${money(r.prop)}</td>` : "") + (hasLoans ? `<td class="${r.loans < -CENT ? "down" : ""}">${money(r.loans)}</td>` : "")
+    + `<td>${money(r.flat)}</td><td style="font-weight:600">${money(r.net)}</td><td>${money(r.contributed)}</td>`
+    + (hasLoans ? `<td>${money(r.paidDown)}</td>` : "") + `</tr>`).join("");
   document.getElementById("projTableWrap").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 

@@ -122,10 +122,26 @@ Cash, property, custom categories and debt are held at today's balance.
   on the page, group and per-account alike. Each year's deposits are the
   previous year's plus the percentage you set (3% by default), stepping up
   once a year like a raise.
+- **Model as a loan** — any loan except a credit card can be paid down month
+  by month instead of held flat. Enter the **interest rate** and either your
+  **monthly payment** (principal + interest only, not escrow) or the **years
+  left**, plus any **extra principal** per month. It starts from the balance in
+  your sheet, so it works at any point in the loan with no original loan amount
+  needed. You see the payoff date, the interest still to pay, and what the
+  extra payment saves; a payment too small to cover a month's interest is
+  flagged. Fixed-rate loans only.
+- **After payoff, invest the payment** — once a loan is paid off, its payment
+  (plus any extra) becomes a monthly contribution to Investments, or another
+  group or account you choose, from the following month. It stays at the old
+  payment amount rather than rising each year, since it's money you were
+  already spending. Change the extra payment to compare paying the loan down
+  faster against investing sooner.
+- **Property value change** — each Property account gets its own yearly rate:
+  appreciation for a home, or a negative number for a car.
 - Pick how many years to project, and switch between nominal dollars and
   **today's dollars** (deflated by the inflation rate you set).
-- Tiles break the result into today's balance + contributions + growth, which
-  always add up to the projected total.
+- Tiles break the result into today's balance + contributions + loan
+  principal paid down + growth, which always add up to the projected total.
 - Hover the chart for any year; the table below lists every year.
 - The Owner filter applies, and contributions are saved separately per owner
   view. Inputs are remembered in the browser, so rebuilding the dashboard keeps them.
@@ -267,9 +283,9 @@ Three useful views with **Exclude**:
 
 If you don't track the home's value at all, just exclude the mortgage.
 
-The Projection tab holds both columns at today's balance — it doesn't model
-home appreciation or the mortgage paydown — so for long horizons, excluding
-both gives the cleaner picture.
+On the Projection tab, tick **Model as a loan** on the mortgage to pay it down
+month by month, give the home a **value change** rate, and optionally invest
+the mortgage payment once it's paid off — see [A Projection tab](#what-you-get).
 
 ## How it works
 
