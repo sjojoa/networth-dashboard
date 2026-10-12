@@ -86,6 +86,8 @@ a shortcut or shell alias.
 - **Owner** — everyone, or one person. Read from the spreadsheet's legend.
 - **Values: $ / %** — one switch for every figure on the page (see below).
 - **Closed accounts** — show or hide accounts you no longer hold.
+- **Exclude** — leave chosen accounts out of every total, chart, debt ratio and
+  the projection; see [Excluding accounts](#excluding-accounts).
 - **Table view** — every number in the workbook, for the current filters.
 
 **A net worth chart you can put anything on**
@@ -96,8 +98,10 @@ off and the smaller lines get the full axis. Hover for values at any snapshot, o
 focus the chart and walk it with ← →.
 
 **Then:** stat tiles per category · assets stacked by category over time ·
-balances owed ·each account's contribution to net worth over the range · and a card
-per account with its balance, change, share and sparkline.
+balances owed · debt-to-assets and debt-to-liquid ratios (hover the `?` for what
+each counts) · each account's contribution to net worth over the range, with a dot
+for each account's owner · and a card per account with its balance, change, share
+and sparkline.
 
 Light and dark themes, with the choice remembered.
 
@@ -213,6 +217,59 @@ snapshots following a real balance, it's marked closed: it disappears from the
 cards, table columns, change chart and series picker, but **keeps counting toward
 every total for the period it existed**, so history never changes. The filter bar
 grows a button to show them again, tagged with the date last held.
+
+### Excluding accounts
+
+Sometimes you want two answers: where you stand *with* a big debt, and where you
+stand without it. Open **Exclude** in the filter bar and tick the accounts to
+leave out — debts are listed first.
+
+- Every figure on the page recalculates without them: the headline, tiles,
+  charts, debt-to-assets and debt-to-liquid, and the Projection tab.
+- Both answers stay on screen. The headline reads *Net worth · excluding
+  Mortgage*, with *Including Mortgage: …* underneath, and the net worth chart
+  adds a dashed line for the full figure.
+- Excluded accounts keep their cards, dimmed and tagged *Excluded*, with an
+  **Include** button to put them back. The note under the filter bar always
+  says what's left out.
+- Your choice is remembered in this browser, so it survives a rebuild.
+
+Excluding is a view, not an edit — the workbook is never changed.
+
+### Tracking a home and its mortgage
+
+Give each property **two columns**: one for the home's value and one for what
+you still owe on it.
+
+| Column | Header example | What to enter |
+|---|---|---|
+| Value | `Home` | The price you bought at, in the first row. After that, leave it blank and update it only when you want to — after an appraisal, or once a year from a valuation site. |
+| Debt | `Mortgage` | The balance owed, as a negative number, on your usual schedule. |
+
+This works because a blank cell carries the last value forward: you enter the
+purchase price once and the home holds that value every week until you change
+it, while the mortgage tracks the weekly paydown. The home's card says when its value
+was last entered (*Updated Oct 17, 2025*), so it's clear how fresh the figure is.
+
+Names like `Home`, `House` or `Condo` land in **Property**, and anything with
+`mortgage` in it lands in **Liabilities**, so you usually don't need row 3 —
+type the category there if your names are unusual. Net worth then includes your
+**equity** (value minus mortgage), and the Liabilities heading shows the
+mortgage against your assets.
+
+Three useful views with **Exclude**:
+
+- **Nothing excluded** — net worth including your home equity.
+- **Home and Mortgage excluded** — where you stand apart from the house. This
+  is usually the number people mean by "without the mortgage".
+- **Mortgage only** — counts the home as if it were paid off. It overstates
+  what you have, so use it knowingly.
+
+If you don't track the home's value at all, just exclude the mortgage.
+
+The Projection tab holds both columns at today's balance — it doesn't model
+home appreciation or the mortgage paydown — so for long horizons, excluding
+both gives the cleaner picture.
 
 ## How it works
 

@@ -20,11 +20,11 @@
     --down: #d03b3b;
     --c-1: #2a78d6;  /* net worth · Cash */
     --c-2: #eb6834;  /* Bonds · plot slot 1 */
-    --c-3: #1baf7a;  /* Retirement · plot slot 2 */
-    --c-4: #eda100;  /* Taxable investing · plot slot 3 */
-    --c-5: #e87ba4;  /* spare category · owner 2 */
-    --c-6: #008300;  /* owner 1 */
-    --c-7: #4a3aa7;  /* liability 2 · plot slot 4 · owner 3 */
+    --c-3: #1baf7a;  /* Retirement · plot slot 2 · owner 3 */
+    --c-4: #eda100;  /* Taxable investing · plot slot 3 · owner 2 */
+    --c-5: #e87ba4;  /* spare category */
+    --c-6: #008300;  /* liability 3 */
+    --c-7: #4a3aa7;  /* liability 2 · plot slot 4 · owner 1 */
     --c-8: #e34948;  /* liability 1 */
     --spark: #898781;
   }
@@ -81,6 +81,7 @@
   .filters { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin: 22px 0 6px; }
   .filters .label { color: var(--text-muted); font-size: 12px; margin: 0 2px 0 0; }
   .filters .spacer { flex: 1 1 auto; }
+  .filters .filter-end { display: inline-flex; gap: 10px; margin-left: auto; }
   .filter-note { color: var(--text-muted); font-size: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border); min-height: 18px; }
   .filter-note .sep { opacity: 0.5; margin: 0 6px; }
 
@@ -187,10 +188,27 @@
   .tip .key { width: 13px; height: 2px; border-radius: 2px; flex: none; }
 
   .board-group { margin-top: 22px; }
-  .board-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  /* Above the cards that follow, so a help tip opening downward isn't covered. */
+  .board-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; position: relative; z-index: 3; flex-wrap: wrap; }
   .board-head .nm { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
   .board-head .dot { width: 9px; height: 9px; border-radius: 3px; }
   .board-head .tot { color: var(--text-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .help {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; margin-left: 4px; vertical-align: 1px; border-radius: 999px;
+    border: 1px solid var(--axis); color: var(--text-secondary); font-size: 10px; font-weight: 600;
+    cursor: help; font-variant-numeric: normal;
+  }
+  .help:focus-visible { outline: 2px solid var(--c-1); outline-offset: 2px; }
+  .help .help-tip {
+    position: absolute; left: -12px; top: calc(100% + 8px); z-index: 30; width: 280px; max-width: 80vw;
+    background: var(--surface-1); border: 1px solid var(--axis); border-radius: 9px; padding: 9px 11px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.13); color: var(--text-secondary); font-size: 12px;
+    font-weight: 400; line-height: 1.45; text-align: left; white-space: normal;
+    opacity: 0; visibility: hidden; transition: opacity .1s;
+  }
+  .help .help-tip b { color: var(--text-primary); font-weight: 600; }
+  .help:hover .help-tip, .help:focus .help-tip { opacity: 1; visibility: visible; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 12px; }
   .acct .top { display: flex; align-items: flex-start; gap: 8px; }
   .acct .nm { font-size: 13px; font-weight: 600; min-width: 0; }
@@ -199,6 +217,16 @@
   .acct .share { color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .acct .spark { margin-top: 10px; width: 100%; height: auto; }
   .acct.is-closed { opacity: 0.72; }
+  .acct.is-excluded { opacity: 0.6; border-style: dashed; }
+  .acct.is-excluded .value.owed { color: var(--text-secondary); }
+  .acct .plotbtn.incl { opacity: 1; }
+  .chip.excl { color: var(--text-secondary); border: 1px dashed var(--axis); }
+  .chip.excl::before { background: none; }
+  .chip.excl + .chip { margin-left: 0; }
+  .hero .incl { color: var(--text-secondary); font-size: 13px; margin-top: 6px; }
+  .hero .incl b { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .filters .dd summary { font-size: 13px; padding: 7px 13px; min-height: 34px; }
+  .dd.on summary { color: var(--text-primary); font-weight: 600; border-color: var(--axis); background: var(--ghost); }
   .acct .asof { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
   td.carried { color: var(--text-muted); font-style: italic; }
   .acct .plotbtn {
@@ -305,7 +333,14 @@
     </div>
     <button id="closedBtn" class="dash-only" type="button" aria-pressed="false" hidden></button>
     <span class="spacer"></span>
-    <button id="tableBtn" class="dash-only" type="button" aria-pressed="false">Table view</button>
+    <!-- Kept together so they wrap as a pair rather than stranding one button. -->
+    <span class="filter-end">
+      <details class="dd" id="exclDd">
+        <summary id="exclSummary" title="Leave accounts out of every total">Exclude</summary>
+        <div class="dd-menu" id="exclMenu"></div>
+      </details>
+      <button id="tableBtn" class="dash-only" type="button" aria-pressed="false">Table view</button>
+    </span>
   </div>
   <div class="filter-note dash-only" id="filterNote"></div>
 
@@ -315,6 +350,7 @@
       <div class="label" id="heroLabel">Net worth</div>
       <div class="figure" id="heroValue">—</div>
       <div class="delta" id="heroDelta"></div>
+      <div class="incl" id="heroIncl" hidden></div>
       <div class="tiles" style="grid-template-columns: 1fr 1fr; margin-top: 18px;" id="heroTiles"></div>
     </div>
 
@@ -358,6 +394,7 @@
         <span class="item"><span class="sw" style="background: var(--c-1)"></span>Added to net worth</span>
         <span class="item"><span class="sw" style="background: var(--c-8)"></span>Subtracted from net worth</span>
       </div>
+      <div class="legend" id="changeOwners" style="margin-top:0"></div>
       <div class="plot" id="changePlot"></div>
     </div>
   </div>
@@ -440,7 +477,14 @@ const CATEGORY_POOL = ["--c-1", "--c-2", "--c-3", "--c-4", "--c-5"];
 // repeating one. red<->green sits in the 6-8 CVD band, which the legend,
 // the 2px segment gaps and the tooltip cover as secondary encoding.
 const LIAB_VARS = ["--c-8", "--c-7", "--c-6"];
-const OWNER_VARS = ["--c-6", "--c-5", "--c-7"];
+// Owners: violet, amber, aqua. Green and red already mean up and down on this
+// page, and a person shouldn't read as "the good one" or "the bad one" — so
+// neither is an owner color, and pink is out for sitting too close to red.
+// Blue is out too: it's net worth and "added to net worth". These three pass
+// the validator all-pairs in both modes (owners sit side by side in the
+// filter bar); amber is under 3:1 on the light surface, so an owner color is
+// only ever a dot or tint beside the owner's name, never the text itself.
+const OWNER_VARS = ["--c-7", "--c-4", "--c-3"];
 // Net worth keeps --c-1; every other plotted line draws from this pool in order.
 // blue → orange → aqua → yellow → violet clears every gate in both modes.
 const PLOT_POOL = ["--c-2", "--c-3", "--c-4", "--c-7"];
@@ -459,6 +503,18 @@ const RANGES = [
   { id: "custom", label: "Custom", title: "Pick your own dates" },
 ];
 
+const EXCL_KEY = "nw-excluded";
+function loadExcluded() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXCL_KEY));
+    if (Array.isArray(saved)) return new Set(saved.filter((n) => typeof n === "string"));
+  } catch (e) { /* storage blocked or corrupt */ }
+  return new Set();
+}
+function saveExcluded() {
+  try { localStorage.setItem(EXCL_KEY, JSON.stringify(Array.from(state.excluded))); } catch (e) { /* not persisted */ }
+}
+
 const state = {
   range: "all",
   from: null,          // ISO date typed into the custom range inputs
@@ -469,6 +525,7 @@ const state = {
   showNet: true,
   plotted: [],         // series keys, in the order they were added
   table: false,
+  excluded: loadExcluded(),   // account names left out of every total
 };
 const slotOf = new Map();  // series key -> css var; kept while it stays plotted
 
@@ -636,6 +693,16 @@ const asOfLabel = (a, i) => {
 };
 const isStale = (a, i) => !a.closed && a.carriedSet.has(i);
 
+// Liquid assets: anything that could be sold or withdrawn to pay a debt without
+// an early-withdrawal penalty or selling a home. Every other asset category —
+// cash, bonds, taxable investing, anything custom — counts.
+const ILLIQUID_CATS = ["Retirement", "Property"];
+const isLiquid = (a) => !a.isLiability && ILLIQUID_CATS.indexOf(a.category) < 0;
+
+/* A "?" that explains a figure on hover or keyboard focus. */
+const helpTip = (label, html) =>
+  `<span class="help" tabindex="0" role="note" aria-label="${esc(label)}">?<span class="help-tip">${html}</span></span>`;
+
 const ALL_CARDS = LIABS_ALL.length && LIABS_ALL.every((a) => /card/i.test(a.name));
 // The chart stacks positive amounts owed; the tile shows the signed balance.
 const OWED_LABEL = ALL_CARDS ? "Card balances owed" : "Balances owed";
@@ -645,7 +712,16 @@ const inOwner = (a) => state.owner === "all" || a.owner === state.owner;
 /* counted() drives every total: a closed account still holds the balance it had
    before it closed, so hiding it must never change history. listed() drives the
    things you can hide — cards, table columns, change rows, the series picker. */
-const counted = () => DATA.accounts.filter(inOwner);
+/* Excluding an account takes it out of counted(), so it leaves every total,
+   chart, ratio and the projection at once. Its card stays on the board,
+   dimmed, so you can see what's been left out and put it back. */
+const isExcluded = (a) => state.excluded.has(a.name);
+const counted = () => DATA.accounts.filter((a) => inOwner(a) && !isExcluded(a));
+const excludedHere = () => DATA.accounts.filter((a) => inOwner(a) && isExcluded(a));
+const withExcluded = () => DATA.accounts.filter(inOwner);
+const netAllAt = (i) => sumAt(withExcluded(), i);
+// "Mortgage", "Home and Mortgage", or "3 accounts" once a list stops reading well.
+const excludedLabel = (list) => list.length <= 2 ? list.map((a) => a.name).join(" and ") : plural(list.length, "account");
 const listed = () => counted().filter((a) => state.showClosed || !a.closed);
 const countedAssets = () => counted().filter((a) => !a.isLiability);
 const countedLiabs = () => counted().filter((a) => a.isLiability);
@@ -700,6 +776,13 @@ function labelOf(key) {
 function plotSeries(idx) {
   const out = [];
   if (state.showNet) out.push({ label: "Net worth", cssVar: "--c-1", raw: idx.map((i) => netAt(i)) });
+  // With accounts excluded, the full figure rides along as a dashed reference,
+  // so both answers are on the chart. It's a reference, not a series, so it
+  // takes no plot slot and wears muted ink rather than a categorical hue.
+  const ex = excludedHere();
+  if (state.showNet && ex.length) {
+    out.push({ label: "Including " + excludedLabel(ex), cssVar: "--text-muted", dash: true, raw: idx.map((i) => netAllAt(i)) });
+  }
   state.plotted.forEach((key) => {
     const members = membersOf(key);
     if (!members.length) return;
@@ -725,7 +808,9 @@ function renderNetWorth(idx) {
   const dropped = all.filter((s) => shown.indexOf(s) < 0).map((s) => s.label);
 
   document.getElementById("nwLegend").innerHTML = shown.length < 2 ? "" : shown
-    .map((s) => `<span class="item"><span class="ln" style="background: var(${s.cssVar})"></span>${esc(s.label)}</span>`).join("");
+    .map((s) => `<span class="item"><span class="ln" style="background: ${s.dash
+      ? `repeating-linear-gradient(90deg, var(${s.cssVar}) 0 4px, transparent 4px 7px)`
+      : `var(${s.cssVar})`}"></span>${esc(s.label)}</span>`).join("");
 
   if (!shown.length) {
     document.getElementById("nwNote").textContent = dropped.length
@@ -765,7 +850,7 @@ function renderNetWorth(idx) {
   }
   shown.forEach((sv) => {
     const pts = sv.vals.map((v, k) => `${X(k).toFixed(1)},${Y(v).toFixed(1)}`);
-    s += `<path d="M${pts.join(" L")}" fill="none" stroke="var(${sv.cssVar})" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s += `<path d="M${pts.join(" L")}" fill="none" stroke="var(${sv.cssVar})" stroke-width="${sv.dash ? 1.5 : 2}"${sv.dash ? ` stroke-dasharray="4 3"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
   });
 
   // End markers, then end labels — a label is dropped where it would collide,
@@ -987,10 +1072,10 @@ function renderChange(idx) {
   // Percent is each account's own change, so an account starting at $0 has none.
   const all = listed().map((a) => {
     const base = a.series[a0], delta = a.series[a1] - base;
-    return { name: a.name, money: delta, pct: Math.abs(base) >= 1 ? (delta / Math.abs(base)) * 100 : null };
+    return { name: a.name, owner: a.owner, money: delta, pct: Math.abs(base) >= 1 ? (delta / Math.abs(base)) * 100 : null };
   });
   const rows = all.filter((r) => !pctMode || r.pct !== null)
-    .map((r) => ({ name: r.name, delta: pctMode ? r.pct : r.money, money: r.money, pct: r.pct }))
+    .map((r) => ({ name: r.name, owner: r.owner, delta: pctMode ? r.pct : r.money, money: r.money, pct: r.pct }))
     .sort((x, y) => y.delta - x.delta);
   const noBase = all.filter((r) => pctMode && r.pct === null).map((r) => r.name);
   const hiddenMoved = counted().filter((a) => a.closed && !state.showClosed && Math.abs(a.series[a1] - a.series[a0]) > 0.005).length;
@@ -1000,6 +1085,14 @@ function renderChange(idx) {
       : `Contribution to net worth, ${longDate(ALL_DATES[a0])} → ${longDate(ALL_DATES[a1])}. Paying down a card counts as an increase.`)
     + (noBase.length ? ` ${noBase.join(", ")} started at $0, so ${noBase.length === 1 ? "it has" : "they have"} no percentage.` : "")
     + (hiddenMoved ? ` ${plural(hiddenMoved, "closed account")} changed in this range and ${hiddenMoved === 1 ? "is" : "are"} hidden.` : "");
+  // Owner key — only for owners who actually have a row, and only when the
+  // chart mixes owners (filtered to one person, every dot would match).
+  const ownersShown = OWNERS.filter((o) => rows.some((r) => r.owner === o.name));
+  const byOwner = ownersShown.length > 1;
+  document.getElementById("changeOwners").innerHTML = byOwner
+    ? `<span class="item" style="color: var(--text-muted)">Account owner:</span>` + ownersShown.map((o) =>
+        `<span class="item"><span class="sw" style="border-radius:999px; background: var(${ownerVar(o.name)})"></span>${esc(o.name)}</span>`).join("")
+    : "";
   if (!rows.length) { clearPlot(plot, "Nothing to show for this filter."); return; }
 
   const rowH = 26, W = width(plot, 520);
@@ -1021,8 +1114,9 @@ function renderChange(idx) {
     s += `<text class="tick" x="${X(t).toFixed(1)}" y="${(m.t + ih + 17).toFixed(1)}" text-anchor="middle">${isZero ? "0" : axisFmt(t)}</text>`;
   });
   const CH = 6.2;                                     // ≈ width of one digit at 11.5px
+  const DOT = byOwner ? 12 : 0;                       // room for the owner dot
   const fitName = (name) => {
-    const room = m.l - 16;
+    const room = m.l - 16 - DOT;
     if (name.length * 5.9 <= room) return name;
     return name.slice(0, Math.max(3, Math.floor(room / 5.9) - 1)) + "…";
   };
@@ -1033,7 +1127,10 @@ function renderChange(idx) {
     if (Math.abs(r.delta) > 0.005) {
       s += `<path d="${endRoundedRectH(X(0), X(r.delta), y, bh, 4)}" fill="var(${pos ? "--c-1" : "--c-8"})"/>`;
     }
-    s += `<text class="tick" x="${m.l - 10}" y="${baseY}" text-anchor="end" style="font-size:11.5px">${esc(fitName(r.name))}</text>`;
+    s += `<text class="tick" x="${m.l - 10 - DOT}" y="${baseY}" text-anchor="end" style="font-size:11.5px; fill: var(--text-secondary)">${esc(fitName(r.name))}${r.owner ? `<title>${esc(r.name)} · ${esc(r.owner)}</title>` : ""}</text>`;
+    if (byOwner && r.owner) {
+      s += `<circle cx="${m.l - 14}" cy="${(y + bh / 2).toFixed(1)}" r="4" fill="var(${ownerVar(r.owner)})"><title>${esc(r.owner)}</title></circle>`;
+    }
 
     // Value rides outside the bar end where there's room; a bar that runs to the
     // edge takes its label inside instead, so it never lands on the name column.
@@ -1076,9 +1173,16 @@ function renderBoard(idx) {
   let html = "";
 
   const owedTotal = Math.abs(sumAt(countedLiabs(), a1));
+  const liquidList = countedAssets().filter(isLiquid);
+  const liquidTotal = sumAt(liquidList, a1);
+  const liquidCats = ASSET_CATS.filter((c) => liquidList.some((a) => a.category === c));
+  const illiquidCats = ASSET_CATS.filter((c) => ILLIQUID_CATS.indexOf(c) >= 0 && counted().some((a) => a.category === c));
 
-  CATEGORIES.filter((c) => list.some((a) => a.category === c)).forEach((c) => {
-    const members = list.filter((a) => a.category === c).slice().sort((x, y) => Math.abs(y.series[a1]) - Math.abs(x.series[a1]));
+  const shownExcl = excludedHere().filter((a) => state.showClosed || !a.closed);
+  const onBoard = list.concat(shownExcl);
+  CATEGORIES.filter((c) => onBoard.some((a) => a.category === c)).forEach((c) => {
+    const members = onBoard.filter((a) => a.category === c).slice().sort((x, y) =>
+      (isExcluded(x) - isExcluded(y)) || Math.abs(y.series[a1]) - Math.abs(x.series[a1]));
     const isLiabCat = LIAB_CATS.indexOf(c) >= 0;
     // Totals count every account in the category, including any hidden closed
     // ones — otherwise the shares wouldn't add up to 100%.
@@ -1088,14 +1192,29 @@ function renderBoard(idx) {
     const cPct = Math.abs(cThen) >= 1 ? (cDelta / Math.abs(cThen)) * 100 : null;
     // For a liability category the ratio is debt against assets — a different
     // quantity from an asset category's share, so it gets its own wording.
+    const owed = Math.abs(cTotal);
     const ratio = isLiabCat
-      ? `${((Math.abs(cTotal) / assetsTotal) * 100).toFixed(1)}% debt-to-assets`
+      ? `${((owed / assetsTotal) * 100).toFixed(1)}% debt-to-assets`
+        + helpTip("What is debt-to-assets?",
+            `<b>Debt-to-assets</b> — ${money(owed)} owed ÷ ${money(assetsTotal)}, everything you own `
+            + `(including retirement and property). The share of your assets the debt would claim if you `
+            + `cashed out everything.`)
+        + ` · ` + (liquidTotal > 0 ? `${((owed / liquidTotal) * 100).toFixed(1)}% debt-to-liquid` : `no liquid assets`)
+        + helpTip("What is debt-to-liquid?",
+            `<b>Debt-to-liquid</b> — ${money(owed)} owed ÷ ${money(Math.max(0, liquidTotal))} of liquid assets: `
+            + `${liquidCats.length ? esc(liquidCats.join(", ")) : "none right now"}. That's what you could use to pay the debt `
+            + `without early-withdrawal penalties or selling property`
+            + (illiquidCats.length ? ` — ${esc(illiquidCats.join(" and "))} ${illiquidCats.length === 1 ? "is" : "are"} left out` : "")
+            + `. Under 100% means you could clear it today.`)
       : `${((cTotal / assetsTotal) * 100).toFixed(1)}% of assets`;
     html += `<div class="board-group"><div class="board-head">`
       + `<span class="nm"><span class="dot" style="background: var(${catVar[c]})"></span>${esc(c)}</span>`
-      + `<span class="tot"><span class="amt${cTotal < 0 ? " owed" : ""}">${money(cTotal)}</span>`
-      + ` · <span class="${dirClass(cDelta)}">${arrow(cDelta)} ${bothWays(cDelta, cPct, state.mode === "pct")}</span>`
-      + ` · ${ratio}</span></div><div class="cards">`;
+      + (inCat.length
+          ? `<span class="tot"><span class="amt${cTotal < 0 ? " owed" : ""}">${money(cTotal)}</span>`
+            + ` · <span class="${dirClass(cDelta)}">${arrow(cDelta)} ${bothWays(cDelta, cPct, state.mode === "pct")}</span>`
+            + ` · ${ratio}</span>`
+          : `<span class="tot">excluded from totals</span>`)
+      + `</div><div class="cards">`;
 
     members.forEach((a) => {
       const key = "acct:" + a.name;
@@ -1108,8 +1227,10 @@ function renderBoard(idx) {
       const shareTxt = isLiabCat
         ? `${owedTotal ? ((Math.abs(v) / owedTotal) * 100).toFixed(1) : "0.0"}% of total owed`
         : `${((v / assetsTotal) * 100).toFixed(1)}% of assets`;
-      html += `<div class="card acct${a.closed ? " is-closed" : ""}">`
+      const excl = isExcluded(a);
+      html += `<div class="card acct${a.closed ? " is-closed" : ""}${excl ? " is-excluded" : ""}">`
         + `<div class="top"><span class="nm">${esc(a.name)}</span>`
+        + (excl ? `<span class="chip excl" title="Left out of every total — use Exclude to change">Excluded</span>` : "")
         + (a.closed
             ? `<span class="chip closed" title="No balance since ${a.lastHeld ? longDate(a.lastHeld) : "—"}">Closed</span>`
             : (a.owner ? `<span class="chip" style="--own: var(${ownerVar(a.owner)})"><span class="dot"></span>${esc(a.owner)}</span>` : ""))
@@ -1117,13 +1238,15 @@ function renderBoard(idx) {
         + `<div class="value${v < 0 ? " owed" : ""}">${money(v)}</div>`
         // Account cards always carry both figures, whatever the $/% switch says.
         + `<div class="meta"><span class="${dirClass(d)}">${arrow(d)} ${bothWays(d, dPct, false)}</span>`
-        + `<span class="share">${a.closed && a.lastHeld ? "last held " + shortDate(a.lastHeld) : shareTxt}</span></div>`
+        + `<span class="share">${excl ? "not in totals" : a.closed && a.lastHeld ? "last held " + shortDate(a.lastHeld) : shareTxt}</span></div>`
         + (isStale(a, a1)
             ? `<div class="asof" title="Not updated on ${longDate(ALL_DATES[a1])} — showing the balance entered on ${longDate(ALL_DATES[updatedIdx(a, a1)])}">Updated ${asOfLabel(a, a1)}</div>`
             : "")
         + sparkline(idx.map((i) => a.series[i]), a.cssVar)
-        + `<button type="button" class="plotbtn" data-plot="${esc(key)}" aria-pressed="${on}"${full ? " disabled" : ""}`
-        + ` title="${on ? "Remove from the chart" : "Plot this account on the chart"}">${on ? "Plotted" : "Plot"}</button>`
+        + (excl
+            ? `<button type="button" class="plotbtn incl" data-include="${esc(a.name)}" title="Count this account in every total again">Include</button>`
+            : `<button type="button" class="plotbtn" data-plot="${esc(key)}" aria-pressed="${on}"${full ? " disabled" : ""}`
+              + ` title="${on ? "Remove from the chart" : "Plot this account on the chart"}">${on ? "Plotted" : "Plot"}</button>`)
         + `</div>`;
     });
     html += `</div></div>`;
@@ -1131,7 +1254,7 @@ function renderBoard(idx) {
 
   document.getElementById("board").innerHTML = html || `<div class="empty">No accounts match this filter.</div>`;
   document.getElementById("boardNote").textContent =
-    `${plural(list.length, "account")} · values as of ${longDate(ALL_DATES[a1])} · change and sparkline over the selected range · hover a card to plot it on the chart`
+    `${plural(list.length, "account")}${shownExcl.length ? ` (+${shownExcl.length} excluded)` : ""} · values as of ${longDate(ALL_DATES[a1])} · change and sparkline over the selected range · hover a card to plot it on the chart`
     + (list.some((a) => isStale(a, a1)) ? ` · "Updated" marks a balance not entered on that date, carried forward from its last entry` : "");
 }
 
@@ -1140,8 +1263,16 @@ function renderTiles(idx) {
   const a0 = idx[0], a1 = idx[idx.length - 1];
   const net = netAt(a1), net0 = netAt(a0), dNet = net - net0;
 
+  const ex = excludedHere();
   document.getElementById("heroLabel").textContent =
-    state.owner === "all" ? "Net worth" : `Net worth · ${state.owner}`;
+    (state.owner === "all" ? "Net worth" : `Net worth · ${state.owner}`)
+    + (ex.length ? ` · excluding ${excludedLabel(ex)}` : "");
+  const incl = document.getElementById("heroIncl");
+  incl.hidden = !ex.length;
+  if (ex.length) {
+    const full = netAllAt(a1);
+    incl.innerHTML = `Including ${esc(excludedLabel(ex))}: <b class="${full < 0 ? "down" : ""}">${money(full)}</b>`;
+  }
   const pctMode = state.mode === "pct";
   const netPct = net0 ? (dNet / Math.abs(net0)) * 100 : null;
   document.getElementById("heroValue").textContent = money(net);
@@ -1187,7 +1318,8 @@ function renderTable(idx) {
   document.getElementById("tableNote").textContent =
     "Every value in the workbook for the current filters. Δ is the change in net worth from the previous snapshot."
     + (anyCarried ? " Grey italic values were left blank that week and carry the previous entry forward." : "")
-    + (hidden ? ` ${plural(hidden, "closed account")} not shown as a column, but still counted in net worth.` : "");
+    + (hidden ? ` ${plural(hidden, "closed account")} not shown as a column, but still counted in net worth.` : "")
+    + (excludedHere().length ? ` Excluding ${excludedLabel(excludedHere())} — not shown or counted.` : "");
   const head = `<tr><th>Date</th>${list.map((a) => `<th>${esc(a.name)}</th>`).join("")}<th>Net worth</th><th>Δ</th></tr>`;
   const body = idx.map((i, k) => {
     const net = netAt(i);
@@ -1488,6 +1620,7 @@ function renderProjection() {
   document.getElementById("projScope").textContent =
     `Starting from balances on ${longDate(ALL_DATES[LAST])}`
     + (state.owner === "all" ? " for everyone." : ` for ${state.owner}.`)
+    + (excludedHere().length ? ` Excluding ${excludedLabel(excludedHere())}.` : "")
     + (OWNERS.length > 1 ? " Group contributions are saved separately for each owner view; per-account settings stay with the account." : "");
   const others = CATEGORIES.filter((c) => PROJ_GROUPS.every((g) => g.cat !== c) && counted().some((a) => a.category === c));
   document.getElementById("projFlatNote").textContent = others.length
@@ -1626,6 +1759,33 @@ function setView(view) {
   renderAll();
 }
 
+/* ── exclude menu ──────────────────────────────────────────────────────── */
+function renderExcludeMenu() {
+  const a1 = LAST;
+  const pool = withExcluded().filter((a) => isExcluded(a) || state.showClosed || !a.closed);
+  // Debts first — leaving out a mortgage is the usual reason to be here.
+  const cats = LIAB_CATS.concat(ASSET_CATS).filter((c) => pool.some((a) => a.category === c));
+  let html = "";
+  cats.forEach((c) => {
+    html += `<div class="grp">${esc(c)}</div>`;
+    pool.filter((a) => a.category === c).forEach((a) => {
+      html += `<label><input type="checkbox" data-excl="${esc(a.name)}"${isExcluded(a) ? " checked" : ""}>`
+        + `<span class="nm">${esc(a.name)}</span><span class="vl">${money(a.series[a1])}</span></label>`;
+    });
+  });
+  html += `<div class="hint">Ticked accounts drop out of every total, chart, ratio and the projection; their cards stay, dimmed. `
+    + `To see where you stand apart from a home, exclude the home and its mortgage together.</div>`;
+  document.getElementById("exclMenu").innerHTML = pool.length ? html : `<div class="hint" style="border:0">No accounts for this filter.</div>`;
+  const n = excludedHere().length;
+  document.getElementById("exclSummary").textContent = n ? `Excluding ${n}` : "Exclude";
+  document.getElementById("exclDd").classList.toggle("on", n > 0);
+}
+function setExcluded(name, on) {
+  if (on) state.excluded.add(name); else state.excluded.delete(name);
+  saveExcluded();
+  renderAll();
+}
+
 /* ── shell ─────────────────────────────────────────────────────────────── */
 function renderAll() {
   // Drop plotted series the current filters have emptied out.
@@ -1636,6 +1796,7 @@ function renderAll() {
   });
 
   const idx = windowIdx();
+  renderExcludeMenu();
   renderTiles(idx);
   renderPlotMenu(idx);
   renderNetWorth(idx);
@@ -1663,6 +1824,8 @@ function renderAll() {
   if (closed && !state.showClosed) {
     bits.push(`${plural(closed, "closed account")} hidden — still counted in every total.`);
   }
+  const ex = excludedHere();
+  if (ex.length) bits.push(`Excluding ${excludedLabel(ex)} from every total.`);
   document.getElementById("filterNote").innerHTML = bits.map(esc).join(`<span class="sep">·</span>`);
 }
 
@@ -1724,12 +1887,17 @@ function buildControls() {
     if (cb) toggleSeries(cb.dataset.key);
   });
   document.getElementById("board").addEventListener("click", (e) => {
+    const inc = e.target.closest("[data-include]");
+    if (inc) { setExcluded(inc.dataset.include, false); return; }
     const btn = e.target.closest("[data-plot]");
     if (btn && !btn.disabled) toggleSeries(btn.dataset.plot);
   });
+  document.getElementById("exclMenu").addEventListener("change", (e) => {
+    const cb = e.target.closest("[data-excl]");
+    if (cb) setExcluded(cb.dataset.excl, cb.checked);
+  });
   document.addEventListener("click", (e) => {
-    const dd = document.getElementById("plotDd");
-    if (dd.open && !dd.contains(e.target)) dd.open = false;
+    document.querySelectorAll("details.dd[open]").forEach((dd) => { if (!dd.contains(e.target)) dd.open = false; });
   });
 
   const tableBtn = document.getElementById("tableBtn");
