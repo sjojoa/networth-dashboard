@@ -553,6 +553,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
    residue from summing the columns, not money, so it prints as a clean $0.00
    rather than −$0.00 with a red arrow beside it. */
 const CENT = 0.005;
+const CLOSED_RUN = DATA.closedRun || 3;   // from build_dashboard.py, so the two never disagree
 function amount(v, withSign) {
   if (Math.abs(v) < CENT) v = 0;
   const sign = v > 0 ? (withSign ? "+" : "") : v < 0 ? "−" : "";
@@ -745,6 +746,14 @@ const countedLiabs = () => counted().filter((a) => a.isLiability);
 const sumAt = (list, i) => list.reduce((s, a) => s + a.series[i], 0);
 const netAt = (i) => sumAt(counted(), i);
 const closedCount = () => counted().filter((a) => a.closed).length;
+/* Closed and never-funded accounts hide behind the same button. Name them for
+   what they are: "closed" or "unfunded" when they're all one kind, "hidden"
+   when they're mixed. */
+const hiddenNoun = () => {
+  const hid = counted().filter((a) => a.closed);
+  if (hid.length && hid.every((a) => a.unfunded)) return "unfunded account";
+  return hid.some((a) => a.unfunded) ? "hidden account" : "closed account";
+};
 
 /* Snap a typed date to the last snapshot on or before it. Values are weekly, so
    a date between snapshots resolves to the previous one — never a future one. */
@@ -1249,13 +1258,15 @@ function renderBoard(idx) {
         + `<div class="top"><span class="nm">${esc(a.name)}</span>`
         + (excl ? `<span class="chip excl" title="Left out of every total — use Exclude to change">Excluded</span>` : "")
         + (a.closed
-            ? `<span class="chip closed" title="No balance since ${a.lastHeld ? longDate(a.lastHeld) : "—"}">Closed</span>`
+            ? (a.unfunded
+                ? `<span class="chip closed" title="Has never held a balance — hidden after ${CLOSED_RUN} snapshots at $0">Never funded</span>`
+                : `<span class="chip closed" title="No balance since ${a.lastHeld ? longDate(a.lastHeld) : "—"}">Closed</span>`)
             : (a.owner ? `<span class="chip" style="--own: var(${ownerVar(a.owner)})"><span class="dot"></span>${esc(a.owner)}</span>` : ""))
         + `</div>`
         + `<div class="value${v < 0 ? " owed" : ""}">${money(v)}</div>`
         // Account cards always carry both figures, whatever the $/% switch says.
         + `<div class="meta"><span class="${dirClass(d)}">${arrow(d)} ${bothWays(d, dPct, false)}</span>`
-        + `<span class="share">${excl ? "not in totals" : a.closed && a.lastHeld ? "last held " + shortDate(a.lastHeld) : shareTxt}</span></div>`
+        + `<span class="share">${excl ? "not in totals" : a.unfunded ? "never funded" : a.closed && a.lastHeld ? "last held " + shortDate(a.lastHeld) : shareTxt}</span></div>`
         + (isStale(a, a1)
             ? `<div class="asof" title="Not updated on ${longDate(ALL_DATES[a1])} — showing the balance entered on ${longDate(ALL_DATES[updatedIdx(a, a1)])}">Updated ${asOfLabel(a, a1)}</div>`
             : "")
@@ -1335,7 +1346,7 @@ function renderTable(idx) {
   document.getElementById("tableNote").textContent =
     "Every value in the workbook for the current filters. Δ is the change in net worth from the previous snapshot."
     + (anyCarried ? " Grey italic values were left blank that week and carry the previous entry forward." : "")
-    + (hidden ? ` ${plural(hidden, "closed account")} not shown as a column, but still counted in net worth.` : "")
+    + (hidden ? ` ${plural(hidden, hiddenNoun())} not shown as a column, but still counted in net worth.` : "")
     + (excludedHere().length ? ` Excluding ${excludedLabel(excludedHere())} — not shown or counted.` : "");
   const head = `<tr><th>Date</th>${list.map((a) => `<th>${esc(a.name)}</th>`).join("")}<th>Net worth</th><th>Δ</th></tr>`;
   const body = idx.map((i, k) => {
@@ -2069,9 +2080,9 @@ function renderAll() {
   const closed = closedCount();
   const btn = document.getElementById("closedBtn");
   btn.hidden = closed === 0;
-  btn.textContent = `${plural(closed, "closed account")}`;
+  btn.textContent = `${plural(closed, hiddenNoun())}`;
   btn.setAttribute("aria-pressed", String(state.showClosed));
-  btn.title = state.showClosed ? "Hide accounts that are no longer in use" : "Show accounts that are no longer in use";
+  btn.title = (state.showClosed ? "Hide" : "Show") + " accounts that are closed or have never been funded";
 
   const bits = [];
   if (state.range === "custom") {
@@ -2081,7 +2092,10 @@ function renderAll() {
       : `Values are weekly, so your dates snapped back to the nearest snapshots on or before them: ${longDate(from)} → ${longDate(to)}.`);
   }
   if (closed && !state.showClosed) {
-    bits.push(`${plural(closed, "closed account")} hidden — still counted in every total.`);
+    const noun = hiddenNoun();
+    bits.push(noun === "hidden account"
+      ? `${plural(closed, "account")} hidden (closed or never funded) — still counted in every total.`
+      : `${plural(closed, noun)} hidden — still counted in every total.`);
   }
   const ex = excludedHere();
   if (ex.length) bits.push(`Excluding ${excludedLabel(ex)} from every total.`);

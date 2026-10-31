@@ -35,7 +35,8 @@ HEADER_ROW = 4
 FIRST_DATA_ROW = 5
 
 ZERO = 0.005       # dollars below this count as "no balance"
-CLOSED_RUN = 3     # consecutive $0 snapshots at the end before an account is closed
+CLOSED_RUN = 3     # consecutive $0 snapshots at the end before an account is closed,
+                   # or — never funded — since its first typed entry before it's hidden
 
 # Explicit category overrides, for names no keyword would catch. Editing this is
 # optional — it is the second of four resolution steps in category_for().
@@ -150,17 +151,22 @@ def carry_forward(raw):
     return series, carried
 
 
-def closed_state(series):
+def closed_state(series, first_entry):
     """An account is closed once it has been $0 for the last few snapshots after
-    having held a balance — a rolled-over 401k, say. Returns (closed, last index
-    with a balance)."""
+    having held a balance — a rolled-over 401k, say. One that has never held a
+    balance is hidden the same way, once CLOSED_RUN snapshots have passed since
+    its first typed entry: the clock starts there rather than at row 1, so a
+    column added to a sheet with years of history isn't hidden on day one, and
+    an all-blank column (nothing typed yet) is left showing.
+    Returns (hidden, last index with a balance, never funded)."""
     held = [i for i, v in enumerate(series) if abs(v) > ZERO]
     if not held:
-        return False, None                    # never used; not "closed"
+        unfunded = first_entry is not None and len(series) - first_entry >= CLOSED_RUN
+        return unfunded, None, unfunded
     tail = series[-CLOSED_RUN:] if len(series) >= CLOSED_RUN else series
     if all(abs(v) <= ZERO for v in tail):
-        return True, held[-1]
-    return False, None
+        return True, held[-1], False
+    return False, None, False
 
 
 def order_categories(accounts):
@@ -212,14 +218,17 @@ def extract(xlsx_path):
 
     accounts = []
     for i, c in enumerate(columns):
-        series, carried = carry_forward([r[i] for r in rows])
-        closed, last_held = closed_state(series)
+        raw = [r[i] for r in rows]
+        series, carried = carry_forward(raw)
+        first_entry = next((k for k, v in enumerate(raw) if not is_blank(v)), None)
+        closed, last_held, unfunded = closed_state(series, first_entry)
         accounts.append({
             "name": c["name"],
             "owner": c["owner"],
             "category": category_for(c["name"], series, c["rawCategory"]),
             "isLiability": is_liability(c["name"], series, c["rawCategory"]),
             "closed": closed,
+            "unfunded": unfunded,
             "lastHeld": dates[last_held] if last_held is not None else None,
             "series": series,
             "carried": carried,
@@ -234,6 +243,7 @@ def extract(xlsx_path):
         "accounts": accounts,
         "owners": owners,
         "categoryOrder": order_categories(accounts),
+        "closedRun": CLOSED_RUN,
     }
 
 
@@ -268,13 +278,16 @@ def main():
 
     data = build(xlsx_path)
     latest = sum(a["series"][-1] for a in data["accounts"])
-    closed = [a["name"] for a in data["accounts"] if a["closed"]]
+    closed = [a["name"] for a in data["accounts"] if a["closed"] and not a["unfunded"]]
+    unfunded = [a["name"] for a in data["accounts"] if a["unfunded"]]
     print(f"Wrote {OUTPUT}")
     print(f"  {len(data['dates'])} snapshots, {len(data['accounts'])} accounts")
     print(f"  owners: " + ", ".join(f"{o['name']} ({o['accounts']})" for o in data["owners"]))
     print(f"  categories: " + ", ".join(data["categoryOrder"]))
     if closed:
         print(f"  closed: " + ", ".join(closed))
+    if unfunded:
+        print(f"  hidden, never funded: " + ", ".join(unfunded))
     stale = [a["name"] for a in data["accounts"] if a["carried"] and a["carried"][-1] == len(data["dates"]) - 1]
     if stale:
         print(f"  carried forward to the latest snapshot: " + ", ".join(stale))

@@ -234,6 +234,14 @@ cards, table columns, change chart and series picker, but **keeps counting towar
 every total for the period it existed**, so history never changes. The filter bar
 grows a button to show them again, tagged with the date last held.
 
+An account that has **never held a balance** is hidden by the same rule: once
+it has sat at $0 for three snapshots, it moves behind that button, tagged
+*Never funded*. The count starts from the first value you type in its column —
+`0` included — not from the top of the sheet, so a column added to a workbook
+with years of history isn't hidden the day you add it. A column with nothing
+typed in it at all stays visible. Either kind comes back on its own the first
+time you enter a balance.
+
 ### Excluding accounts
 
 Sometimes you want two answers: where you stand *with* a big debt, and where you
