@@ -28,20 +28,32 @@
     --c-7: #4a3aa7;  /* liability 2 · plot slot 4 · owner 1 */
     --c-8: #e34948;  /* liability 1 */
     --spark: #898781;
+    /* Brand teal is for the app's chrome only — navigation, the active tab,
+       sidebar notes. Data keeps the validated palette above. */
+    --side: #f3f3f0;
+    --brand: #217568;
+    --brand-ink: #15594f;
+    --brand-tint: #e4efea;
+    --on-brand: #ffffff;
   }
+  /* Dark mode follows the Figma dark theme: navy cards on a near-black page,
+     mint for the brand accent. Every chart palette below was re-run through
+     the validator against the navy card (#16202b) and passes as it did on the
+     previous charcoal surface; text contrast on the card is 15:1 primary,
+     10:1 secondary, 6:1 muted. */
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-1: #1a1a19;
-    --page: #0d0d0d;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --grid: #2c2c2a;
-    --axis: #383835;
+    --surface-1: #16202b;
+    --page: #0f1412;
+    --text-primary: #f5f7f6;
+    --text-secondary: #c4ced3;
+    --text-muted: #8fa0a8;
+    --grid: #1f2a31;
+    --axis: #3a4a55;
     --border: rgba(255,255,255,0.10);
     --ghost: rgba(255,255,255,0.06);
     --up: #0ca30c;
-    --down: #e66767;   /* stepped for the dark surface: 5.4:1, so small red text still clears 4.5 */
+    --down: #e66767;   /* stepped for the dark surface: 5.1:1 on the navy card, so small red text still clears 4.5 */
     --c-1: #3987e5;
     --c-2: #d95926;
     --c-3: #199e70;
@@ -49,9 +61,14 @@
     --c-5: #d55181;
     --c-6: #008300;
     --liab-3: #199e70;
+    --side: #111820;
+    --brand: #217568;
+    --brand-ink: #7ee2c8;
+    --brand-tint: #133a33;
+    --on-brand: #ffffff;
     --c-7: #9085e9;
     --c-8: #e66767;
-    --spark: #898781;
+    --spark: #8fa0a8;
   }
 
   * { box-sizing: border-box; }
@@ -209,10 +226,10 @@
     background: var(--surface-1); border: 1px solid var(--axis); border-radius: 9px; padding: 9px 11px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.13); color: var(--text-secondary); font-size: 12px;
     font-weight: 400; line-height: 1.45; text-align: left; white-space: normal;
-    opacity: 0; visibility: hidden; transition: opacity .1s;
+    display: none;   /* not just invisible: a hidden tip still widens the page on a phone */
   }
   .help .help-tip b { color: var(--text-primary); font-weight: 600; }
-  .help:hover .help-tip, .help:focus .help-tip { opacity: 1; visibility: visible; }
+  .help:hover .help-tip, .help:focus .help-tip { display: block; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 12px; }
   .acct .top { display: flex; align-items: flex-start; gap: 8px; }
   .acct .nm { font-size: 13px; font-weight: 600; min-width: 0; }
@@ -251,6 +268,12 @@
   .chip .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--own); display: inline-block; margin-right: 5px; vertical-align: 0.5px; }
   .chip.closed { color: var(--text-secondary); border: 1px solid var(--border); }
   .chip.closed::before { background: none; }
+  /* In dark mode an owner chip is the owner's name in their colour, no pill, as
+     in the Figma dark theme. Each owner colour clears 4.5:1 as text on the navy
+     card (violet 5.3, amber 5.4, aqua 4.8). Amber doesn't on the light surface,
+     so light mode keeps ink text on a tinted pill. */
+  :root[data-theme="dark"] .chip:not(.closed):not(.excl) { color: var(--own); padding-left: 0; padding-right: 0; }
+  :root[data-theme="dark"] .chip:not(.closed):not(.excl)::before { opacity: 0; }
 
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
   th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
@@ -259,13 +282,58 @@
   .scroll { overflow-x: auto; max-height: 560px; overflow-y: auto; margin-top: 12px; }
   tbody tr:hover td { background: var(--ghost); }
 
-  .tabs { display: flex; gap: 2px; margin-top: 18px; border-bottom: 1px solid var(--border); }
-  .tabs button {
-    border: none; background: none; border-radius: 6px 6px 0 0; margin-bottom: -1px;
-    border-bottom: 2px solid transparent; padding: 8px 14px;
+  /* ── app shell: sidebar + main ── */
+  .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+  /* A grid item with auto margins shrinks to fit its content, so a wide table
+     would push the column past the window. Pin it to the track instead. */
+  main.wrap { width: 100%; min-width: 0; }
+  .side {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column;
+    background: var(--side); border-right: 1px solid var(--border); padding: 26px 14px 18px;
   }
-  .tabs button[aria-selected="true"] { color: var(--text-primary); font-weight: 600; border-bottom-color: var(--c-1); }
-  body.view-proj .dash-only { display: none !important; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 22px; font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--brand); color: var(--on-brand); display: grid; place-items: center; flex: none; }
+  .brand-mark svg { width: 18px; height: 18px; }
+  .side-nav { display: flex; flex-direction: column; gap: 3px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: none; border-radius: 10px;
+    padding: 9px 12px; min-height: 40px; font-size: 13.5px; color: var(--text-secondary); text-align: left;
+  }
+  .nav-item:hover:not([aria-current="page"]) { background: var(--ghost); }
+  .nav-item[aria-current="page"] { background: var(--brand-tint); color: var(--brand-ink); font-weight: 600; }
+  .nav-item svg { width: 18px; height: 18px; flex: none; }
+  .nav-item .badge {
+    margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-muted);
+  }
+  .side-sec { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 26px 12px 8px; }
+  .member {
+    display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 9px;
+    padding: 6px 12px; min-height: 34px; font-size: 13px; color: var(--text-secondary); text-align: left;
+  }
+  .member:hover { background: var(--ghost); }
+  .member[aria-pressed="true"] { color: var(--text-primary); font-weight: 600; }
+  .member .dot { width: 9px; height: 9px; border-radius: 999px; flex: none; }
+  .member .ct { margin-left: auto; font-size: 11.5px; color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .side-spacer { flex: 1 1 auto; min-height: 24px; }
+  .side-note { background: var(--brand-tint); border-radius: 12px; padding: 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+  .side-note b { display: block; color: var(--brand-ink); font-weight: 600; margin: 6px 0 4px; }
+  .side-note svg { width: 18px; height: 18px; color: var(--brand-ink); }
+  .side-foot { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+  .side-foot .src { font-size: 11px; color: var(--text-muted); padding: 8px 12px 0; line-height: 1.4; }
+  .eyebrow { font-size: 11.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .top h1 { font-size: 26px; letter-spacing: -0.02em; }
+  .view-off { display: none !important; }
+  .pager { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
+  .pager select {
+    font: inherit; font-size: 12.5px; color: var(--text-primary); background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; min-height: 30px;
+  }
+  .pager button { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+  .pager .range { font-variant-numeric: tabular-nums; min-width: 92px; text-align: center; }
+  .soon { max-width: 720px; }
+  .soon ul { margin: 10px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; }
+  .soon li + li { margin-top: 6px; }
 
   .proj-row { display: grid; grid-template-columns: minmax(320px, 1fr) 1.8fr; gap: 16px; align-items: start; margin-top: 20px; }
   .proj-group { padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -309,55 +377,82 @@
   .proj-acct .fields { margin-top: 6px; }
 
   @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .side {
+      position: static; height: auto; flex-direction: row; align-items: center; gap: 6px;
+      overflow-x: auto; padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--border);
+    }
+    .brand { padding: 0 8px 0 0; }
+    .brand .word, .side-sec, .side-members, .side-spacer, .side-note, .side-foot .src, .nav-item .badge { display: none; }
+    .side-nav { flex-direction: row; gap: 2px; }
+    .nav-item { width: auto; white-space: nowrap; padding: 8px 10px; }
+    .side-foot { border: 0; margin: 0 0 0 auto; padding: 0; }
     .hero-row, .grid2, .proj-row { grid-template-columns: 1fr; }
-    .dd-menu { right: auto; left: 0; }
+    .dd-menu { width: min(306px, calc(100vw - 32px)); }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
+<aside class="side" aria-label="Main navigation">
+  <div class="brand"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l5-5 4 4 8-8"/><path d="M14 8h6v6"/></svg></span><span class="word">Net worth</span></div>
+  <nav class="side-nav" aria-label="Views">
+    <button type="button" class="nav-item" id="navDash" data-view="dash" aria-controls="dashView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</button>
+    <button type="button" class="nav-item" id="navProj" data-view="proj" aria-controls="projView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/></svg>Projection</button>
+    <button type="button" class="nav-item" id="navEntries" data-view="entries" aria-controls="entriesView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Update balances</button>
+    <button type="button" class="nav-item" id="navSpending" data-view="spending" aria-controls="spendingView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>Spending<span class="badge">Beta</span></button>
+    <button type="button" class="nav-item" id="navGoals" data-view="goals" aria-controls="goalsView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4"/><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1"/></svg>Goals<span class="badge">Soon</span></button>
+  </nav>
+  <div class="side-members">
+    <div class="side-sec">Household</div>
+    <div id="sideMembers"></div>
+  </div>
+  <div class="side-spacer"></div>
+  <div class="side-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><b>Private by design</b>No bank connections. Balances come only from what you enter.</div>
+  <div class="side-foot">
+    <button type="button" class="nav-item" id="themeBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><span class="lbl">Dark mode</span></button>
+    <div class="src" id="sourceNote"></div>
+  </div>
+</aside>
+
+<main class="wrap">
   <header class="top">
     <div>
-      <h1>Net worth dashboard</h1>
-      <div class="sub" id="sourceNote"></div>
+      <div class="eyebrow">Net worth dashboard</div>
+      <h1 id="viewTitle">Overview</h1>
+      <div class="sub" id="viewIntro"></div>
     </div>
-    <button id="themeBtn" type="button">Dark mode</button>
   </header>
 
-  <nav class="tabs" role="tablist" aria-label="Views">
-    <button type="button" role="tab" id="tabDash" data-view="dash" aria-controls="dashView" aria-selected="true">Overview</button>
-    <button type="button" role="tab" id="tabProj" data-view="proj" aria-controls="projView" aria-selected="false">Projection</button>
-  </nav>
-
   <div class="filters" id="filters" role="group" aria-label="Dashboard filters">
-    <span class="label dash-only">Range</span>
-    <div class="seg dash-only" id="rangeSeg"></div>
-    <div class="dates dash-only" id="dateInputs">
+    <span class="label" data-views="dash">Range</span>
+    <div class="seg" id="rangeSeg" data-views="dash"></div>
+    <div class="dates" id="dateInputs" data-views="dash">
       <input type="date" id="dateFrom" aria-label="Range start">
       <span class="label">to</span>
       <input type="date" id="dateTo" aria-label="Range end">
     </div>
     <span class="label" id="ownerLabel">Owner</span>
     <div class="seg" id="ownerSeg"></div>
-    <span class="label dash-only">Values</span>
-    <div class="seg dash-only" id="modeSeg">
+    <span class="label" data-views="dash">Values</span>
+    <div class="seg" id="modeSeg" data-views="dash">
       <button type="button" data-mode="money" aria-pressed="true" title="Show dollar amounts">$</button>
       <button type="button" data-mode="pct" aria-pressed="false" title="Show percentages">%</button>
     </div>
-    <button id="closedBtn" class="dash-only" type="button" aria-pressed="false" hidden></button>
+    <button id="closedBtn" type="button" aria-pressed="false" data-views="dash entries" hidden></button>
     <span class="spacer"></span>
     <!-- Kept together so they wrap as a pair rather than stranding one button. -->
     <span class="filter-end">
-      <details class="dd" id="exclDd">
+      <details class="dd" id="exclDd" data-views="dash proj">
         <summary id="exclSummary" title="Leave accounts out of every total">Exclude</summary>
         <div class="dd-menu" id="exclMenu"></div>
       </details>
-      <button id="tableBtn" class="dash-only" type="button" aria-pressed="false">Table view</button>
+      <button id="tableBtn" type="button" aria-pressed="false" data-views="dash">Table view</button>
     </span>
   </div>
-  <div class="filter-note dash-only" id="filterNote"></div>
+  <div class="filter-note" id="filterNote" data-views="dash"></div>
 
-  <div id="dashView" role="tabpanel" aria-labelledby="tabDash">
+  <div id="dashView" role="region" aria-labelledby="navDash">
   <div class="hero-row" style="margin-top:20px">
     <div class="card hero">
       <div class="label" id="heroLabel">Net worth</div>
@@ -425,7 +520,7 @@
   </div>
   </div>
 
-  <div id="projView" role="tabpanel" aria-labelledby="tabProj" hidden>
+  <div id="projView" role="region" aria-labelledby="navProj" hidden>
     <div class="proj-row">
       <div class="card">
         <h2>Assumptions</h2>
@@ -467,6 +562,50 @@
       <div class="scroll" id="projTableWrap"></div>
     </div>
   </div>
+
+  <div id="entriesView" role="region" aria-labelledby="navEntries" hidden>
+    <div class="card stack">
+      <div class="card-head">
+        <h2>Snapshots</h2>
+        <div class="pager">
+          <label>Show <select id="entSize" aria-label="Snapshots per page">
+            <option value="10">10</option><option value="50">50</option><option value="100">100</option><option value="0">All</option>
+          </select></label>
+          <button type="button" id="entNewer" aria-label="Newer snapshots">‹ Newer</button>
+          <span class="range" id="entRange"></span>
+          <button type="button" id="entOlder" aria-label="Older snapshots">Older ›</button>
+        </div>
+      </div>
+      <div class="note" id="entNote"></div>
+      <div class="scroll" id="entWrap"></div>
+    </div>
+  </div>
+
+  <div id="spendingView" role="region" aria-labelledby="navSpending" hidden>
+    <div class="card stack soon">
+      <h2>Coming in phase 3 · beta</h2>
+      <div class="note">An experiment, kept or retired once you've lived with it for a while.</div>
+      <ul>
+        <li><b>Money in</b> each month: the month-to-date change in your cash accounts. Trading and retirement accounts aren't counted.</li>
+        <li><b>Money out</b> each month: the month-to-date change in what you owe on credit cards.</li>
+        <li>Both per month and on average, plus the average monthly difference (in − out).</li>
+        <li>Worked out from the balances you already record — nothing extra to enter. Card payments and transfers between accounts will blur it, which is why it's a beta.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div id="goalsView" role="region" aria-labelledby="navGoals" hidden>
+    <div class="card stack soon">
+      <h2>Coming in phase 4</h2>
+      <div class="note">Targets measured against the balances you already track.</div>
+      <ul>
+        <li>An emergency fund: Cash at or above an amount.</li>
+        <li>A debt paid off by a date, using the loan model from the Projection tab.</li>
+        <li>A net worth target, with the projection saying whether you're on track and when you'd get there.</li>
+      </ul>
+    </div>
+  </div>
+</main>
 </div>
 
 <script>
@@ -2017,16 +2156,86 @@ function renderProjection() {
   document.getElementById("projTableWrap").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
+/* ── views ───────────────────────────────────────────────────────────────
+   Each sidebar item shows one region. Filter-bar controls name the views
+   they apply to in data-views; controls without it (Owner) show everywhere
+   the bar does. */
+const VIEWS = {
+  dash: { title: "Overview", intro: "Where you stand across every account.", hash: "" },
+  proj: { title: "Projection", intro: "Where today's balances could be in the years ahead.", hash: "#projection" },
+  entries: { title: "Update balances", intro: "Every snapshot in your tracker, newest first.", hash: "#entries" },
+  spending: { title: "Spending", intro: "Money in and out each month.", hash: "#spending", noFilters: true },
+  goals: { title: "Goals", intro: "Targets to track against your balances.", hash: "#goals", noFilters: true },
+};
+const viewFromHash = () => Object.keys(VIEWS).find((v) => VIEWS[v].hash && VIEWS[v].hash === location.hash) || "dash";
 function setView(view) {
-  const isProj = view === "proj";
-  document.body.classList.toggle("view-proj", isProj);
-  document.getElementById("dashView").hidden = isProj;
-  document.getElementById("projView").hidden = !isProj;
-  document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
-  // With no owners there's nothing left in the filter bar on this tab.
-  document.getElementById("filters").hidden = isProj && !OWNERS.length;
-  if (history.replaceState) history.replaceState(null, "", isProj ? "#projection" : location.pathname + location.search);
+  if (!VIEWS[view]) view = "dash";
+  state.view = view;
+  Object.keys(VIEWS).forEach((v) => { document.getElementById(v + "View").hidden = v !== view; });
+  document.querySelectorAll(".nav-item[data-view]").forEach((b) => {
+    if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
+  document.querySelectorAll("[data-views]").forEach((el) => el.classList.toggle("view-off", el.dataset.views.split(" ").indexOf(view) < 0));
+  // With no owners, only the overview has anything left in the filter bar.
+  document.getElementById("filters").hidden = !!VIEWS[view].noFilters || (view !== "dash" && !OWNERS.length);
+  document.getElementById("viewTitle").textContent = VIEWS[view].title;
+  document.getElementById("viewIntro").textContent = VIEWS[view].intro;
+  if (history.replaceState) history.replaceState(null, "", VIEWS[view].hash || location.pathname + location.search);
   renderAll();
+}
+
+/* ── update balances (read-only until the hosted database lands) ────────── */
+const ENT_KEY = "nw-entries-size";
+state.entSize = (() => { try { const v = parseInt(localStorage.getItem(ENT_KEY), 10); return [0, 10, 50, 100].indexOf(v) >= 0 ? v : 10; } catch (e) { return 10; } })();
+state.entPage = 0;
+function renderEntries() {
+  const list = listed();
+  const order = ALL_DATES.map((_, i) => i).reverse();          // newest first
+  const size = state.entSize || order.length;
+  const pages = Math.max(1, Math.ceil(order.length / size));
+  state.entPage = Math.min(state.entPage, pages - 1);
+  const start = state.entPage * size, rows = order.slice(start, start + size);
+  document.getElementById("entSize").value = String(state.entSize);
+  document.getElementById("entRange").textContent = `${start + 1}–${start + rows.length} of ${order.length}`;
+  document.getElementById("entNewer").disabled = state.entPage === 0;
+  document.getElementById("entOlder").disabled = state.entPage >= pages - 1;
+  const hidden = counted().length - list.length;
+  document.getElementById("entNote").textContent =
+    "Editing arrives with the hosted database (phase 2) — until then, change the workbook and rebuild."
+    + (list.some((a) => rows.some((i) => a.carriedSet.has(i))) ? " Grey italic values were left blank and carry the previous entry forward." : "")
+    + (hidden ? ` ${plural(hidden, hiddenNoun())} not shown as a column.` : "");
+  const head = `<tr><th>Date</th>${list.map((a) => `<th>${esc(a.name)}</th>`).join("")}<th>Net worth</th><th>Δ</th></tr>`;
+  const body = rows.map((i) => {
+    const net = netAt(i), d = i > 0 ? net - netAt(i - 1) : null;
+    return `<tr><td>${longDate(ALL_DATES[i])}</td>`
+      + list.map((a) => (a.carriedSet.has(i)
+          ? `<td class="carried" title="Blank in the workbook — carried forward from ${longDate(ALL_DATES[updatedIdx(a, i)])}">${money(a.series[i])}</td>`
+          : `<td>${money(a.series[i])}</td>`)).join("")
+      + `<td style="font-weight:600">${money(net)}</td>`
+      + `<td class="${d === null ? "flat" : dirClass(d)}">${d === null ? "–" : signed(d)}</td></tr>`;
+  }).join("");
+  document.getElementById("entWrap").innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+function buildEntries() {
+  document.getElementById("entSize").addEventListener("change", (e) => {
+    state.entSize = parseInt(e.target.value, 10) || 0;
+    state.entPage = 0;
+    try { localStorage.setItem(ENT_KEY, String(state.entSize)); } catch (err) { /* not persisted */ }
+    renderEntries();
+  });
+  document.getElementById("entNewer").addEventListener("click", () => { state.entPage = Math.max(0, state.entPage - 1); renderEntries(); });
+  document.getElementById("entOlder").addEventListener("click", () => { state.entPage++; renderEntries(); });
+}
+
+/* Sidebar household list: the same owner filter as the filter bar. */
+function renderMembers() {
+  const box = document.getElementById("sideMembers");
+  if (!OWNERS.length) { box.parentElement.hidden = true; return; }
+  box.innerHTML = [{ name: "all", label: "Everyone", n: DATA.accounts.length }]
+    .concat(OWNERS.map((o) => ({ name: o.name, label: o.name, n: o.accounts })))
+    .map((m) => `<button type="button" class="member" data-member="${esc(m.name)}" aria-pressed="${state.owner === m.name}"${m.n ? "" : " disabled"}>`
+      + (m.name === "all" ? `<span class="dot" style="background: var(--axis)"></span>` : `<span class="dot" style="background: var(${ownerVar(m.name)})"></span>`)
+      + `${esc(m.label)}<span class="ct">${m.n}</span></button>`).join("");
 }
 
 /* ── exclude menu ──────────────────────────────────────────────────────── */
@@ -2076,6 +2285,8 @@ function renderAll() {
   renderBoard(idx);
   renderTable(idx);
   renderProjection();
+  renderEntries();
+  renderMembers();
 
   const closed = closedCount();
   const btn = document.getElementById("closedBtn");
@@ -2184,7 +2395,7 @@ function buildControls() {
   const themeBtn = document.getElementById("themeBtn");
   const applyTheme = (t) => {
     document.documentElement.dataset.theme = t;
-    themeBtn.textContent = t === "dark" ? "Light mode" : "Dark mode";
+    themeBtn.querySelector(".lbl").textContent = t === "dark" ? "Light mode" : "Dark mode";
     localStorage.setItem("nw-theme", t);
   };
   applyTheme(localStorage.getItem("nw-theme") || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
@@ -2196,8 +2407,15 @@ document.getElementById("sourceNote").textContent =
 
 buildControls();
 buildProjForm();
-document.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
-setView(location.hash === "#projection" ? "proj" : "dash");
+buildEntries();
+document.querySelectorAll(".nav-item[data-view]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+document.getElementById("sideMembers").addEventListener("click", (e) => {
+  const m = e.target.closest("[data-member]");
+  if (!m || m.disabled) return;
+  const seg = document.querySelector(`#ownerSeg [data-owner="${CSS.escape(m.dataset.member)}"]`);
+  if (seg) seg.click();                        // one owner filter, two ways in
+});
+setView(viewFromHash());
 
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 140); });
