@@ -1,0 +1,11 @@
+// Cloudflare Worker that serves the built dashboard as static assets.
+// Deployed by Workers Builds (Cloudflare's GitHub integration) on every push:
+// main goes live, other branches get preview URLs. See "Hosting on Cloudflare"
+// in the README — the site must sit behind Cloudflare Access.
+{
+  "name": "networth-dashboard",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}
