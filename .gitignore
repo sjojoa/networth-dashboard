@@ -11,8 +11,3 @@ Net Worth Dashboard.app/
 
 # never commit the real tracker
 S&P_NetWorthTracker*.xlsx
-
-# Cloudflare build output and local wrangler state
-dist/
-.wrangler/
-node_modules/

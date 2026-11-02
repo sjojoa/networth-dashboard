@@ -302,10 +302,6 @@
   .nav-item:hover:not([aria-current="page"]) { background: var(--ghost); }
   .nav-item[aria-current="page"] { background: var(--brand-tint); color: var(--brand-ink); font-weight: 600; }
   .nav-item svg { width: 18px; height: 18px; flex: none; }
-  .nav-item .badge {
-    margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--text-muted);
-  }
   .side-sec { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 26px 12px 8px; }
   .member {
     display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 9px;
@@ -331,9 +327,6 @@
   }
   .pager button { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
   .pager .range { font-variant-numeric: tabular-nums; min-width: 92px; text-align: center; }
-  .soon { max-width: 720px; }
-  .soon ul { margin: 10px 0 0; padding-left: 18px; color: var(--text-secondary); font-size: 13px; }
-  .soon li + li { margin-top: 6px; }
 
   .proj-row { display: grid; grid-template-columns: minmax(320px, 1fr) 1.8fr; gap: 16px; align-items: start; margin-top: 20px; }
   .proj-group { padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -383,7 +376,7 @@
       overflow-x: auto; padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--border);
     }
     .brand { padding: 0 8px 0 0; }
-    .brand .word, .side-sec, .side-members, .side-spacer, .side-note, .side-foot .src, .nav-item .badge { display: none; }
+    .brand .word, .side-sec, .side-members, .side-spacer, .side-note, .side-foot .src { display: none; }
     .side-nav { flex-direction: row; gap: 2px; }
     .nav-item { width: auto; white-space: nowrap; padding: 8px 10px; }
     .side-foot { border: 0; margin: 0 0 0 auto; padding: 0; }
@@ -400,8 +393,6 @@
     <button type="button" class="nav-item" id="navDash" data-view="dash" aria-controls="dashView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</button>
     <button type="button" class="nav-item" id="navProj" data-view="proj" aria-controls="projView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/></svg>Projection</button>
     <button type="button" class="nav-item" id="navEntries" data-view="entries" aria-controls="entriesView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Update balances</button>
-    <button type="button" class="nav-item" id="navSpending" data-view="spending" aria-controls="spendingView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>Spending<span class="badge">Beta</span></button>
-    <button type="button" class="nav-item" id="navGoals" data-view="goals" aria-controls="goalsView"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4"/><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1"/></svg>Goals<span class="badge">Soon</span></button>
   </nav>
   <div class="side-members">
     <div class="side-sec">Household</div>
@@ -578,31 +569,6 @@
       </div>
       <div class="note" id="entNote"></div>
       <div class="scroll" id="entWrap"></div>
-    </div>
-  </div>
-
-  <div id="spendingView" role="region" aria-labelledby="navSpending" hidden>
-    <div class="card stack soon">
-      <h2>Coming in phase 3 · beta</h2>
-      <div class="note">An experiment, kept or retired once you've lived with it for a while.</div>
-      <ul>
-        <li><b>Money in</b> each month: the month-to-date change in your cash accounts. Trading and retirement accounts aren't counted.</li>
-        <li><b>Money out</b> each month: the month-to-date change in what you owe on credit cards.</li>
-        <li>Both per month and on average, plus the average monthly difference (in − out).</li>
-        <li>Worked out from the balances you already record — nothing extra to enter. Card payments and transfers between accounts will blur it, which is why it's a beta.</li>
-      </ul>
-    </div>
-  </div>
-
-  <div id="goalsView" role="region" aria-labelledby="navGoals" hidden>
-    <div class="card stack soon">
-      <h2>Coming in phase 4</h2>
-      <div class="note">Targets measured against the balances you already track.</div>
-      <ul>
-        <li>An emergency fund: Cash at or above an amount.</li>
-        <li>A debt paid off by a date, using the loan model from the Projection tab.</li>
-        <li>A net worth target, with the projection saying whether you're on track and when you'd get there.</li>
-      </ul>
     </div>
   </div>
 </main>
@@ -2164,8 +2130,6 @@ const VIEWS = {
   dash: { title: "Overview", intro: "Where you stand across every account.", hash: "" },
   proj: { title: "Projection", intro: "Where today's balances could be in the years ahead.", hash: "#projection" },
   entries: { title: "Update balances", intro: "Every snapshot in your tracker, newest first.", hash: "#entries" },
-  spending: { title: "Spending", intro: "Money in and out each month.", hash: "#spending", noFilters: true },
-  goals: { title: "Goals", intro: "Targets to track against your balances.", hash: "#goals", noFilters: true },
 };
 const viewFromHash = () => Object.keys(VIEWS).find((v) => VIEWS[v].hash && VIEWS[v].hash === location.hash) || "dash";
 function setView(view) {
@@ -2177,14 +2141,14 @@ function setView(view) {
   });
   document.querySelectorAll("[data-views]").forEach((el) => el.classList.toggle("view-off", el.dataset.views.split(" ").indexOf(view) < 0));
   // With no owners, only the overview has anything left in the filter bar.
-  document.getElementById("filters").hidden = !!VIEWS[view].noFilters || (view !== "dash" && !OWNERS.length);
+  document.getElementById("filters").hidden = (view !== "dash" && !OWNERS.length);
   document.getElementById("viewTitle").textContent = VIEWS[view].title;
   document.getElementById("viewIntro").textContent = VIEWS[view].intro;
   if (history.replaceState) history.replaceState(null, "", VIEWS[view].hash || location.pathname + location.search);
   renderAll();
 }
 
-/* ── update balances (read-only until the hosted database lands) ────────── */
+/* ── update balances (read-only: the workbook is the source) ───────────── */
 const ENT_KEY = "nw-entries-size";
 state.entSize = (() => { try { const v = parseInt(localStorage.getItem(ENT_KEY), 10); return [0, 10, 50, 100].indexOf(v) >= 0 ? v : 10; } catch (e) { return 10; } })();
 state.entPage = 0;
@@ -2201,7 +2165,7 @@ function renderEntries() {
   document.getElementById("entOlder").disabled = state.entPage >= pages - 1;
   const hidden = counted().length - list.length;
   document.getElementById("entNote").textContent =
-    "Editing arrives with the hosted database (phase 2) — until then, change the workbook and rebuild."
+    "To add or change an entry, edit the workbook and rebuild."
     + (list.some((a) => rows.some((i) => a.carriedSet.has(i))) ? " Grey italic values were left blank and carry the previous entry forward." : "")
     + (hidden ? ` ${plural(hidden, hiddenNoun())} not shown as a column.` : "");
   const head = `<tr><th>Date</th>${list.map((a) => `<th>${esc(a.name)}</th>`).join("")}<th>Net worth</th><th>Δ</th></tr>`;
