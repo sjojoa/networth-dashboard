@@ -323,40 +323,6 @@ slots is part of what keeps adjacent series distinguishable. If you change them,
 change them as a set and re-check. The four-series cap on the chart is there for
 the same reason: past that, hue stops being a reliable way to tell lines apart.
 
-## Hosting on Cloudflare
-
-The dashboard can run as a **Cloudflare Worker** that serves the built page as
-static assets, with **Cloudflare Access** in front so only the people you allow
-can open it. Deploys happen through **Workers Builds**, Cloudflare's GitHub
-integration: every push to `main` goes live, and every other branch gets its own
-preview URL.
-
-> **What gets published is whatever workbook is in this repo** — the invented
-> sample. Never commit a real tracker here: the repo is the build source. Real
-> balances come later, from a database rather than from git.
-
-**Once, to set it up**
-
-1. In the Cloudflare dashboard, go to **Workers & Pages → Create → Import a
-   repository**, and pick this repo (the Cloudflare GitHub app needs access to
-   it).
-2. Build settings:
-   - Build command: `sh scripts/build_site.sh`
-   - Deploy command: `npx wrangler deploy` (the default)
-   - Leave the root directory as the repo root. `wrangler.jsonc` tells Cloudflare
-     to serve `dist/`.
-3. **Before sharing the address, turn on Cloudflare Access.** Under **Zero
-   Trust → Access → Applications**, add a self-hosted application for the
-   Worker's address, with a policy that allows only your household's email
-   addresses (one-time email code or Google sign-in). Make sure the policy also
-   covers the branch **preview URLs**, or turn previews off until it does.
-4. Open the address in a private window. You should get the Access sign-in,
-   not the dashboard.
-
-`scripts/build_site.sh` rebuilds from the workbook when Python is available, and
-otherwise publishes the committed `NetWorth_Dashboard.html` — so rebuild before
-you commit, as usual.
-
 ## Privacy
 
 Everything runs locally. The generated HTML has no scripts from anywhere else, no
