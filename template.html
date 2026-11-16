@@ -1172,6 +1172,15 @@
         <span class="row-status" id="closedStatus" role="status"></span>
       </div>
     </div>
+    <div class="card stack local-only" id="keptCard" hidden>
+      <h2>Kept in this browser</h2>
+      <div class="note" id="keptNote"></div>
+      <div class="set-row">
+        <button type="button" id="keptBackup">Back up to a file</button>
+        <label class="file-btn" id="keptRestore">Restore from a file<input type="file" id="keptFile" accept=".json,application/json" hidden></label>
+        <span class="row-status" id="keptStatus" role="status"></span>
+      </div>
+    </div>
     <div class="card stack" id="helpCard">
       <h2>Help</h2>
       <ul class="help-list">
@@ -1602,28 +1611,135 @@ function withLocalEdits(raw) {
   }
   store = store || { ops: [], savedAt: null, nextId: 1000000 };
   const state = localState(raw), kept = [];
-  LOCAL = { raw, store, state, dropped: 0 };
+  LOCAL = { raw, store, state, dropped: 0, settings: readSettings(raw) };
   for (const op of store.ops) {
     try { applyOp(state, op); kept.push(op); } catch (e) { LOCAL.dropped++; }
   }
   if (LOCAL.dropped) { store.ops = kept; writeLocal(raw, store); }
-  return localData(raw, state);
+  return { ...localData(raw, state), spendingBudget: LOCAL.settings.spendingBudget, goals: LOCAL.settings.goals };
 }
 
 /** The local stand-in for the server: checks and keeps the edit, or throws with what to show. */
 async function localApi(method, path, body) {
+  const settled = settingsApi(method, path, body || {});
+  if (settled !== undefined) return settled;
   if (LOCAL.store.savedAt) {
     throw new Error("These changes are saved to the workbook. Rebuild the dashboard from it before changing anything else: open it from the launcher, or run build_dashboard.py.");
   }
   const op = { method, path, body: body === undefined ? null : JSON.parse(JSON.stringify(body)) };
   if (method === "POST" && path === "/api/snapshots") op.id = LOCAL.store.nextId = (LOCAL.store.nextId || 1000000) + 1;
+  const renamed = (m) => (m = path.match(/^\/api\/accounts\/(\d+)$/)) && method === "PUT" ? LOCAL.state.accounts.find((a) => a.id === +m[1]) : null;
+  const acct = renamed(), before = acct && acct.name;
   const out = applyOp(LOCAL.state, op);
   LOCAL.store.ops.push(op);
   if (!writeLocal(LOCAL.raw, LOCAL.store)) {
     LOCAL.store.ops.pop();
     throw new Error("This browser wouldn't keep the change (its storage is full or blocked), so nothing was changed.");
   }
+  if (acct && acct.name !== before) renameInLocalSettings(before, acct.name);
   return out || {};
+}
+
+
+/* Settings the workbook doesn't hold (goals, card budgets) are kept in this browser
+   too, but take effect at once: they never go to the workbook, so there's nothing to
+   save. Settings → Kept in this browser backs them up to a file and restores them. */
+const settingsKey = (raw) => `nw-local-settings:${raw.source}`;
+function readSettings(raw) {
+  try { const s = JSON.parse(localStorage.getItem(settingsKey(raw)) || "null"); if (s && typeof s === "object") return { spendingBudget: s.spendingBudget || {}, goals: Array.isArray(s.goals) ? s.goals : [] }; }
+  catch (e) { /* none yet */ }
+  return { spendingBudget: {}, goals: [] };
+}
+function writeSettings(raw, s) {
+  try { localStorage.setItem(settingsKey(raw), JSON.stringify(s)); return true; } catch (e) { return false; }
+}
+const LOCAL_GOAL_KINDS = ["save", "debt", "networth"];
+
+/** A goal as the server would keep it (src/api.js goalFrom). */
+function localGoal(S, body, id, kept) {
+  if (!LOCAL_GOAL_KINDS.includes(body.kind)) throw new Error("Pick what kind of goal this is.");
+  const kind = body.kind;
+  const name = localText(body.name, "The goal's name", 60);
+  const note = localText(body.note, "The description", 140, true);
+  const date = body.date === null || body.date === undefined || body.date === "" ? null : body.date;
+  if (date !== null && !localIsDate(date)) throw new Error("Pick a valid target date.");
+  if (kind !== "save" && date === null) throw new Error("This kind of goal needs a target date.");
+  const target = kind === "debt" ? null : localNumber(body.target, "The target", 0, 1e10);
+  if (kind !== "debt" && !(target > 0)) throw new Error("Enter the amount you're aiming for.");
+  const picks = Array.isArray(body.holdings) ? body.holdings : [];
+  if (picks.length > 50) throw new Error("That's too many accounts for one goal.");
+  const held = [];
+  for (const h of picks) {
+    const a = S.accounts.find((x) => x.id === (h && h.accountId));
+    if (!a) throw new Error("That account doesn't exist any more. Reload and try again.");
+    const amount = localNumber(h.amount, `The amount set aside in ${a.name}`, 0, 1e10);
+    if (!held.some((x) => x.name === a.name)) held.push({ name: a.name, amount });
+  }
+  if (kind === "debt" && !held.length) throw new Error("Pick the debt to pay off.");
+  if (kind === "debt" && held.length > 1) throw new Error("A debt goal is for one debt. Add a goal for each.");
+  const account = kind === "debt" ? held[0].name : null, accounts = kind === "save" && held.length ? held : null;
+  const monthly = localNumber(body.monthly, "The monthly plan", 0, 1e8);
+  let split = null;
+  if (body.split && kind === "save") {
+    if (typeof body.split !== "object" || Array.isArray(body.split)) throw new Error("The split couldn't be read.");
+    split = {};
+    for (const [owner, v] of Object.entries(body.split)) {
+      const o = S.owners.find((x) => x.name.toLowerCase() === owner.toLowerCase());
+      if (!o) throw new Error(`There's no owner called "${owner}". Reload and try again.`);
+      const n = localNumber(v, `${o.name}'s share`, 0, 1e8);
+      if (n !== null) split[o.name] = n;
+    }
+    if (!Object.keys(split).length) split = null;
+  }
+  return {
+    id, kind, name, note, target, date, account, accounts,
+    assigned: kind === "save" && !accounts ? localNumber(body.assigned, "The amount set aside", 0, 1e10) : null,
+    monthly: split ? Math.round(Object.values(split).reduce((t, v) => t + v, 0) * 100) / 100 : monthly,
+    split,
+    start: kind === "debt" ? (kept && kept.account === account && typeof kept.start === "number" ? kept.start : localNumber(body.start, "The starting balance", 0, 1e10)) : null,
+  };
+}
+
+/** Goals and budgets: answered and kept at once. Returns undefined for anything else. */
+function settingsApi(method, path, body) {
+  const S = LOCAL.state, set = LOCAL.settings;
+  const keep = (out) => { if (!writeSettings(LOCAL.raw, set)) throw new Error("This browser wouldn't keep the change (its storage is full or blocked)."); return out; };
+  let m;
+  if (method === "PUT" && path === "/api/spending/budget") {
+    if (!Array.isArray(body.budgets)) throw new Error("Expected a list of budgets.");
+    for (const [id, v] of body.budgets) {
+      const a = S.accounts.find((x) => x.id === id);
+      if (!a) throw new Error("A budget is for an account that doesn't exist any more. Reload and try again.");
+      const amount = localNumber(v, `The budget for ${a.name}`, 0, 1e9);
+      if (amount === null) delete set.spendingBudget[a.name.toLowerCase()]; else set.spendingBudget[a.name.toLowerCase()] = amount;
+    }
+    return keep({});
+  }
+  if (method === "POST" && path === "/api/goals") {
+    if (set.goals.length >= 50) throw new Error("That's the most goals the dashboard holds (50).");
+    const goal = localGoal(S, body, set.goals.reduce((n, g) => Math.max(n, g.id || 0), 0) + 1, null);
+    set.goals.push(goal);
+    return keep({ id: goal.id });
+  }
+  if ((m = path.match(/^\/api\/goals\/(\d+)$/)) && (method === "PUT" || method === "DELETE")) {
+    const k = set.goals.findIndex((g) => g.id === +m[1]);
+    if (k < 0) throw new Error("That goal doesn't exist any more. Reload and try again.");
+    if (method === "DELETE") set.goals.splice(k, 1);
+    else set.goals[k] = localGoal(S, body, +m[1], set.goals[k].kind === body.kind ? set.goals[k] : null);
+    return keep({});
+  }
+  return undefined;
+}
+
+/** A renamed account keeps its goals and card budget (kept by name), as on the hosted version. */
+function renameInLocalSettings(from, to) {
+  if (from === to) return;
+  const set = LOCAL.settings, same = (n) => typeof n === "string" && n.toLowerCase() === from.toLowerCase();
+  set.goals = set.goals.map((g) => ({ ...g, ...(same(g.account) ? { account: to } : {}),
+    ...(Array.isArray(g.accounts) ? { accounts: g.accounts.map((h) => (h && same(h.name) ? { ...h, name: to } : h)) } : {}) }));
+  const k = from.toLowerCase();
+  if (set.spendingBudget[k] !== undefined && k !== to.toLowerCase()) { set.spendingBudget[to.toLowerCase()] = set.spendingBudget[k]; delete set.spendingBudget[k]; }
+  writeSettings(LOCAL.raw, set);
 }
 
 const DATA = withLocalEdits(/*__DATA__*/null);
@@ -2643,7 +2759,7 @@ function renderSpending() {
 
 /* The monthly budget, per credit card, for the latest month with snapshots. */
 function renderBudget(last, cards) {
-  const hosted = DATA.hosted && EDIT;
+  const hosted = !!EDIT;   // kept by the server, or in this browser on the local dashboard
   $id("budgetCard").hidden = !hosted;
   $id("spRow").classList.toggle("solo", !hosted);
   if (!hosted) return;
@@ -3475,7 +3591,7 @@ function goalCard(s) {
 }
 
 function renderGoals() {
-  const hosted = !!(DATA.hosted && EDIT);
+  const hosted = !!EDIT;   // kept by the server, or in this browser on the local dashboard
   $id("goalsLocal").hidden = hosted;
   $id("goalsMain").hidden = !hosted;
   if (!hosted) return;
@@ -3717,7 +3833,7 @@ async function saveGoal(e) {
 }
 
 function buildGoals() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
   $id("navGoals").hidden = false;
   const badge = $id("navGoals").querySelector(".badge");
   if (badge) badge.remove();
@@ -4995,8 +5111,51 @@ function renderLocalBar() {
       + (s.notInWorkbook ? " They were saved once, but this dashboard was built from a workbook without them." : "")
       + ` Close the workbook in Excel, then save.${lost}` : lost.trim();
 }
+/* Settings → Kept in this browser: what only this browser holds, to a file and back. */
+const BACKUP_APP = "net-worth-dashboard";
+function renderKept() {
+  const n = LOCAL.store.ops.length, g = LOCAL.settings.goals.length, b = Object.keys(LOCAL.settings.spendingBudget).length;
+  $id("keptNote").innerHTML = `Your goals (${g}), card budgets (${b}), Projection settings, which accounts are excluded`
+    + `${n ? `, and ${plural(n, "change")} not saved to the workbook yet` : ""} live only in this browser.`
+    + ` Back them up to move them to another browser, or to keep them if this browser's data is cleared. Balances are in the workbook, not in the file.`;
+}
+function buildKept() {
+  renderKept();
+  const readKey = (k) => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  $id("keptBackup").addEventListener("click", () => {
+    const file = { app: BACKUP_APP, version: 1, workbook: DATA.source, made: new Date().toISOString(), settings: LOCAL.settings,
+      edits: LOCAL.store.ops.length && !LOCAL.store.savedAt ? { ops: LOCAL.store.ops, nextId: LOCAL.store.nextId } : null,
+      projection: readKey(PROJ_KEY), excluded: readKey(EXCL_KEY) };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: "application/json" }));
+    a.download = `Net worth dashboard settings ${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    $id("keptStatus").textContent = "Downloaded the backup."; $id("keptStatus").classList.remove("bad");
+  });
+  $id("keptFile").addEventListener("change", async () => {
+    const f = $id("keptFile").files[0], st = $id("keptStatus");
+    $id("keptFile").value = "";
+    if (!f) return;
+    st.classList.remove("bad"); st.textContent = "";
+    let file;
+    try { file = JSON.parse(await f.text()); } catch (e) { file = null; }
+    if (!file || file.app !== BACKUP_APP || !file.settings) { st.textContent = "That isn't a backup from this dashboard."; st.classList.add("bad"); return; }
+    const other = file.workbook && file.workbook !== DATA.source ? ` It was made for ${file.workbook}, not ${DATA.source}.` : "";
+    if (!(await ask("Restore this backup?", `It replaces the goals, card budgets, Projection settings and exclusions kept in this browser`
+      + `${file.edits ? ", and the changes not saved to the workbook yet" : ""}.${other}`, "Restore"))) return;
+    try {
+      writeSettings(LOCAL.raw, { spendingBudget: file.settings.spendingBudget || {}, goals: Array.isArray(file.settings.goals) ? file.settings.goals : [] });
+      if (file.projection) localStorage.setItem(PROJ_KEY, JSON.stringify(file.projection));
+      if (file.excluded) localStorage.setItem(EXCL_KEY, JSON.stringify(file.excluded));
+      if (file.edits && Array.isArray(file.edits.ops)) writeLocal(LOCAL.raw, { ops: file.edits.ops, savedAt: null, nextId: file.edits.nextId || 1000000 });
+      savedReload("Restored the backup.");
+    } catch (e) { st.textContent = "This browser wouldn't keep the backup (its storage is full or blocked)."; st.classList.add("bad"); }
+  });
+}
 function buildLocalBar() {
   if (!LOCAL) return;
+  buildKept();
   renderLocalBar();
   $id("localSave").addEventListener("click", async () => {
     const st = $id("localStatus");
@@ -5010,6 +5169,8 @@ function buildLocalBar() {
   });
   $id("localDiscard").addEventListener("click", async () => {
     if (!(await ask(`Discard ${plural(LOCAL.store.ops.length, "change")}?`, "They're only in this browser, so they can't be brought back.", "Discard"))) return;
+    // Goals and budgets follow renamed accounts back to their workbook names.
+    LOCAL.state.accounts.forEach((a, i) => renameInLocalSettings(a.name, LOCAL.raw.tracker.accounts[i].name));
     writeLocal(LOCAL.raw, null);
     location.reload();
   });

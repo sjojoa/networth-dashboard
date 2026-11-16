@@ -162,9 +162,27 @@ Month by month from your balances: card spending (every rise in a card's
 balance from one snapshot to the next, so never negative), money in (the change
 in cash accounts plus what was paid off on cards) and what's left, for every
 month with a snapshot before it, plus complete-month averages. Click a month for
-each account's part. **Export summary** downloads the monthly figures and the
-breakdown as a spreadsheet. Transfers between accounts blur these figures, and
-the tab says so.
+each account's part. A monthly **budget per credit card** runs from each card's
+last payment, with a forecast to the next one. **Export summary** downloads the
+monthly figures and the breakdown as a spreadsheet. Transfers between accounts
+blur these figures, and the tab says so.
+
+**A Goals tab**
+
+Savings goals (held in one or more accounts, each with its own amount set aside
+or its whole balance, or in all cash accounts together), a debt paid off by a
+date (using the Projection tab's loan model, or the goal's own monthly plan),
+and a net worth target (using the projection). Each goal shows its progress,
+target date, monthly plan and a status: on track, how much more a month it
+needs, or reached. A plan can be split by person ("Building it together"), the
+goal furthest behind gets a suggested monthly amount checked against your
+average left after spending, and accounts holding goals show what's assigned
+and what isn't. Every field in the goal form has a `?` that explains it.
+
+Goals and card budgets are kept in this browser, like the Projection settings.
+**Settings → Kept in this browser** backs them up to a file (with Projection
+settings, exclusions and any changes not saved to the workbook yet) and
+restores them, to move them to another browser or keep them safe.
 
 ### The $ / % switch
 

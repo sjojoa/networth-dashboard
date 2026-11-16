@@ -49,6 +49,9 @@ RUN = r"""
       out.barHidden = $id("localBar").hidden;
       const ids = EDIT.accounts.map((a) => a.id), sid = EDIT.snapshotIds;
       const calls = [
+        ["PUT", "/api/spending/budget", { budgets: [[ids[14], 600]] }],
+        ["POST", "/api/goals", { kind: "debt", name: "Card paid off", date: "2027-06-01", holdings: [{ accountId: ids[14], amount: null }], start: 900 }],
+        ["POST", "/api/goals", { kind: "save", name: "Holiday", target: 5000, holdings: [{ accountId: ids[2], amount: 3000 }], monthly: 200 }],
         ["POST", "/api/snapshots", { date: "2026-08-28", balances: [[ids[0], 9000], [ids[1], null], [ids[2], 15000.5]] }],
         ["POST", "/api/snapshots", { date: "2024-08-16", balances: [[ids[0], 4000]] }],
         ["PUT", `/api/snapshots/${sid[sid.length - 1]}`, { date: "2026-08-21", balances: [[ids[0], 8300.25]] }],
@@ -78,6 +81,10 @@ RUN = r"""
                     card: DATA.accounts[14].name, cardDetails: EDIT.accounts[14], old401: [DATA.accounts[8].name, DATA.accounts[8].closed, DATA.accounts[8].auto],
                     checkingLast: DATA.accounts[0].series[DATA.accounts.length ? DATA.dates.length - 2 : 0] };
       out.bar = $id("localBar").hidden ? null : $id("localBarText").textContent;
+      out.settings = { budget: DATA.spendingBudget, goals: DATA.goals.map((g) => [g.name, g.account || (g.accounts || []).map((h) => h.name + " " + h.amount).join()]) };
+      setView("goals"); await tick(30);
+      out.goalsView = { view: state.view, nav: !$id("navGoals").hidden, cards: [...document.querySelectorAll(".goal-card h3")].map((h) => h.textContent), localNote: !$id("goalsLocal").hidden };
+      out.kept = $id("keptNote").textContent;
       const bytes = Uint8Array.from(atob(window.__BOOK), (c) => c.charCodeAt(0));
       const patched = await patchWorkbook(bytes);
       let bin = ""; for (let i = 0; i < patched.length; i += 8192) bin += String.fromCharCode(...patched.subarray(i, i + 8192));
@@ -152,6 +159,13 @@ def main():
     print("card details:", out["after"]["cardDetails"])
     print("bar:", out["bar"])
     print("stale workbook:", out["stale"])
+    print("settings:", out["settings"])
+    print("goals view:", out["goalsView"])
+    print("kept note:", out["kept"])
+    if out["settings"] != {"budget": {"visa card": 600}, "goals": [["Card paid off", "Visa card"], ["Holiday", "HYSA 3000"]]}:
+        fails.append(("goals and budgets (renamed with the account)", out["settings"]))
+    if out["goalsView"] != {"view": "goals", "nav": True, "cards": ["Card paid off", "Holiday"], "localNote": False}:
+        fails.append(("goals view", out["goalsView"]))
     if "changed since this dashboard was built" not in out["stale"]:
         fails.append(("stale workbook accepted", out["stale"]))
     # Save to workbook, read back by build_dashboard.py
