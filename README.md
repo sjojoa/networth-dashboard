@@ -63,6 +63,8 @@ whether the spreadsheet changed since the last build, rebuilds only if it did,
 and opens the dashboard in your browser. No commands, no Terminal.
 
 So the day-to-day loop is: update balances in Excel → save → double-click the app.
+Or add them in the dashboard itself and press **Save to workbook**; see
+[Editing in the dashboard](#editing-in-the-dashboard).
 
 Two notes:
 
@@ -215,12 +217,52 @@ Rules worth knowing:
 - **Liabilities are negative numbers.** They show in red, count against net
   worth, and appear in the "balances owed" chart as positive amounts so a shorter
   bar plainly means less debt.
-- Snapshots don't have to be weekly or evenly spaced. Blank rows are skipped.
+- Snapshots don't have to be weekly or evenly spaced, or even in date order:
+  they're sorted by date. Blank rows are skipped.
 - **A blank cell means "not updated this time"**, so people can update on
   different schedules — one weekly, one monthly — on the same sheet. A blank
   carries the account's last entered balance forward (blanks before its first
   entry count as $0). The account card then says `Updated Jul 31`, and the
   table shows carried values in grey italics. A typed `0` is still a real $0.
+
+### The Accounts sheet (optional)
+
+A second sheet named **Accounts** holds what the balances sheet doesn't: one row
+per account, matched by name, with any of these headings in row 1:
+
+| Heading | Holds |
+|---|---|
+| `Name` | The account, exactly as in row 4 of the balances sheet |
+| `Type` | `Cash`, `Bonds`, `Retirement`, `Taxable investing`, `Property`, `Other assets`, `Credit card`, `Loan` or `Mortgage` (or a category of your own). Used for the category when row 3 is blank |
+| `Institution`, `Last 4`, `Notes` | Shown on the Accounts tab. Never the full account number |
+| `Status` | `Open` or `Closed`. Blank: decided by the balances (see below) |
+| `Credit limit`, `Interest rate` | For cards; the rate for cash and loans too |
+
+You don't have to make it yourself: the dashboard writes it when you save
+account details (see below).
+
+### Editing in the dashboard
+
+**Update balances** adds, changes and deletes snapshots, **Accounts** edits each
+account's details, and **Settings → Closed and hidden accounts** keeps an
+account showing that the rules would hide. Changes show at once and stay in
+this browser until you press **Save to workbook** in the bar at the top:
+
+- **Close the workbook in Excel first.**
+- **Chrome and Edge** ask once for the folder the workbook is in, then save
+  straight into it. The previous file is kept in a `Workbook backups` folder
+  beside it, one copy per save.
+- **Other browsers** download the updated workbook; put it in place of the old one.
+- Then rebuild the dashboard (double-click the app, or run `build_dashboard.py`).
+  Once it's built from the saved workbook, the changes are no longer kept
+  separately. Until then, further edits wait, so nothing is saved twice.
+
+Only the cells that changed are written: the balances sheet keeps its
+formatting, formulas and anything else in it, and a new snapshot goes below the
+last row with that row's formats and `Total` formula. If the workbook was
+changed in Excel after the dashboard was built, saving stops and asks you to
+rebuild first, so it never writes over your edits. Owners, their colours, new
+accounts and the column order are still set in the workbook itself.
 
 ### Categorising an account
 
@@ -242,7 +284,8 @@ Anything unmatched lands in "Other assets" and still appears everywhere.
 
 ### Retiring an account
 
-Leave the column in place and enter `0` — a blank won't do it, since blanks carry the last balance forward. After three consecutive `$0`
+Leave the column in place and enter `0` (or set it to `Closed` on the Accounts
+sheet) — a blank won't do it, since blanks carry the last balance forward. After three consecutive `$0`
 snapshots following a real balance, it's marked closed: it disappears from the
 cards, table columns, change chart and series picker, but **keeps counting toward
 every total for the period it existed**, so history never changes. The filter bar
@@ -255,6 +298,10 @@ it has sat at $0 for three snapshots, it moves behind that button, tagged
 with years of history isn't hidden the day you add it. A column with nothing
 typed in it at all stays visible. Either kind comes back on its own the first
 time you enter a balance.
+
+A credit card paid off in full every month can look closed when it isn't. Set
+it to `Open` on the Accounts sheet, or untick it in **Settings → Closed and
+hidden accounts**, and it stays visible.
 
 ### Excluding accounts
 
@@ -313,15 +360,18 @@ the mortgage payment once it's paid off — see [A Projection tab](#what-you-get
 
 ```
 NetWorthTracker.xlsx ─→ build_dashboard.py ─→ NetWorth_Dashboard.html
-                              ↑                    (data baked in)
-                        template.html
+        ↑                     ↑                    (data baked in)
+        │           template.html + model.js              │
+        └──────────── Save to workbook ───────────────────┘
 ```
 
 | File | Role |
 |---|---|
 | `build_dashboard.py` | Reads the workbook, classifies accounts, injects JSON into the template |
 | `xlsx_reader.py` | Minimal `.xlsx` parser — an xlsx is a zip of XML, and this reads the few parts needed |
-| `template.html` | All the layout, CSS and chart code. Edit this to change how it looks |
+| `template.html` | All the layout, CSS and chart code, editing and Save to workbook. Edit this to change how it looks |
+| `model.js` | The same rules as `build_dashboard.py` in JavaScript, so the page can redo them after an edit |
+| `test/local_check.py` | Checks editing and Save to workbook in headless Chrome, with the sample workbook |
 | `make_demo_workbook.py` | Generates the fabricated sample workbook |
 | `NetWorth_Dashboard.html` | Generated output — don't edit by hand |
 | `launcher/` | AppleScript source for the macOS one-click launcher, and its build script |
@@ -341,8 +391,9 @@ the same reason: past that, hue stops being a reliable way to tell lines apart.
 
 Everything runs locally. The generated HTML has no scripts from anywhere else, no
 network calls, and no analytics — open it with the wifi off and it works
-identically. Your balances only ever exist in your workbook and in the HTML file
-next to it. Don't commit either one to a public repo.
+identically. Your balances only ever exist in your workbook, in the HTML file
+next to it, and, for edits not yet saved to the workbook, in your browser's own
+storage for this page. Don't commit the workbook or the HTML to a public repo.
 
 ## Licence
 

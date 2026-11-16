@@ -497,6 +497,13 @@
   .closed-list .chip { margin-left: 0; }
   .closed-list .why { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
   .closed-empty { color: var(--text-secondary); font-size: 13px; margin-top: 8px; }
+  /* The local dashboard's unsaved-changes bar */
+  .local-bar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+               margin: 0 0 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--brand); background: var(--brand-tint);
+               font-size: 13px; color: var(--text-primary); box-shadow: 0 4px 14px rgba(0,0,0,0.06); }
+  .local-bar code { font-size: 12px; }
+  .local-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .local-bar .row-status.bad { color: var(--down); }
   .set-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
   .set-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); flex: 0 1 320px; }
   .set-field input, .edit-table .member-email { font: inherit; font-size: 13px; color: var(--text-primary); background: var(--surface-1);
@@ -832,6 +839,12 @@
 </aside>
 
 <main class="wrap">
+  <div class="local-bar" id="localBar" role="status" hidden>
+    <span id="localBarText"></span>
+    <span class="local-actions"><span class="row-status" id="localStatus"></span>
+      <button type="button" id="localDiscard">Discard changes</button>
+      <button type="button" class="primary" id="localSave">Save to workbook</button></span>
+  </div>
   <header class="top">
     <div>
       <div class="eyebrow" id="viewEyebrow">Net worth dashboard</div>
@@ -1101,7 +1114,7 @@
 
   <div id="settingsView" role="region" aria-labelledby="navSettings" hidden>
     <div class="flash" id="setFlash" role="status" hidden></div>
-    <div class="card stack">
+    <div class="card stack hosted-only">
       <h2>Household</h2>
       <div class="note" id="hhRoleNote"></div>
       <div class="set-row">
@@ -1111,7 +1124,7 @@
       </div>
     </div>
 
-    <div class="card stack" id="brandCard">
+    <div class="card stack hosted-only" id="brandCard">
       <h2>Branding</h2>
       <div class="note" id="brandNote">The name and logo at the top of the sidebar, for this household.</div>
       <div class="set-row">
@@ -1129,7 +1142,7 @@
       </div>
     </div>
 
-    <div class="card stack">
+    <div class="card stack hosted-only">
       <h2>Members</h2>
       <div class="note">People who can sign in and see this household. "Shown as" links someone to an owner in the tracker, for their colour.</div>
       <div class="access-note" id="accessNote" hidden>
@@ -1140,7 +1153,7 @@
       <div class="scroll"><table class="edit-table" id="memberTable"></table></div>
     </div>
 
-    <div class="card stack">
+    <div class="card stack hosted-only">
       <h2>Your households</h2>
       <div class="note">Each household has its own accounts and snapshots — for example, family and a business.</div>
       <div class="hh-list" id="hhList"></div>
@@ -1163,10 +1176,15 @@
       <h2>Help</h2>
       <ul class="help-list">
         <li><b>Blank means "not updated".</b> On Update balances, leaving a field blank carries that account's last balance forward; type 0 only when it really is $0.</li>
-        <li><b>Importing replaces everything</b> in this household. After the first import, add snapshots in the app instead, and use <b>Export to Excel</b> now and then as a backup.</li>
-        <li><b>Account details</b> (type, institution, last 4, notes…) live on <b>Accounts</b>, with their own export and import that never touch balances.</li>
-        <li><b>Inviting someone</b> here doesn't let them past Cloudflare Access: also add their email to the <b>Household</b> policy in the Cloudflare dashboard.</li>
-        <li><b>On a shared or borrowed device</b>, use <b>Log out</b> in the menu at the bottom of the sidebar.</li>
+        <li class="local-only" hidden><b>Changes stay in this browser</b> until you press <b>Save to workbook</b> in the bar at the top. Close the workbook in Excel first.
+          Chrome and Edge save straight into it and keep the old file in a <b>Workbook backups</b> folder beside it; other browsers download the updated workbook to put in place of the old one.
+          Then rebuild the dashboard (open it from the launcher, or run <code>build_dashboard.py</code>).</li>
+        <li class="local-only" hidden><b>Account details and Open/Closed</b> are kept on the workbook's <b>Accounts</b> sheet, so you can change them there too.</li>
+        <li class="local-only" hidden><b>Owners, their colours, new accounts and the column order</b> are set in the workbook itself: the legend in row 1, each account's header fill, and its columns.</li>
+        <li class="hosted-only"><b>Importing replaces everything</b> in this household. After the first import, add snapshots in the app instead, and use <b>Export to Excel</b> now and then as a backup.</li>
+        <li class="hosted-only"><b>Account details</b> (type, institution, last 4, notes…) live on <b>Accounts</b>, with their own export and import that never touch balances.</li>
+        <li class="hosted-only"><b>Inviting someone</b> here doesn't let them past Cloudflare Access: also add their email to the <b>Household</b> policy in the Cloudflare dashboard.</li>
+        <li class="hosted-only"><b>On a shared or borrowed device</b>, use <b>Log out</b> in the menu at the bottom of the sidebar.</li>
         <li><b>Undo</b> on Update balances covers snapshot changes made in this browser tab, until it's closed.</li>
       </ul>
     </div>
@@ -1403,7 +1421,212 @@
 
 <script>
 "use strict";
-const DATA = /*__DATA__*/null;
+/* ── the local dashboard: edits kept in this browser, then Save to workbook ──
+   On the hosted page every edit goes to the server. On a dashboard built locally
+   (DATA.local, from build_dashboard.py) the same calls go to localApi instead: each
+   accepted edit is kept in this browser (localStorage) as the call itself, and on load
+   they're replayed onto the workbook's own values (DATA.tracker) and the rules redone
+   with model.js (MODEL, inlined by build_dashboard.py), so every view shows them.
+   Save to workbook writes the result into the .xlsx (saveToWorkbook, further down);
+   once the dashboard is rebuilt from that workbook, the kept edits are dropped.
+   Snapshot ids are sheet rows and account ids sheet columns, so a kept edit still
+   points at the same cell after a rebuild. */
+const MODEL = (() => {
+/*__MODEL__*/
+  return typeof buildData === "function" ? { buildData, categoryForType, typeOf, ASSET_TYPES, DEBT_TYPES } : null;
+})();
+let LOCAL = null;   // { raw, store: { ops, savedAt, nextId }, state, dropped }
+
+const localKey = (raw) => `nw-local-edits:${raw.source}`;
+function readLocal(raw) {
+  try { const s = JSON.parse(localStorage.getItem(localKey(raw)) || "null"); return s && Array.isArray(s.ops) ? s : null; } catch (e) { return null; }
+}
+function writeLocal(raw, s) {
+  try { if (s && s.ops.length) localStorage.setItem(localKey(raw), JSON.stringify(s)); else localStorage.removeItem(localKey(raw)); return true; }
+  catch (e) { return false; }
+}
+
+/** The workbook's data as something edits can change: owners, accounts with their details, snapshots. */
+function localState(raw) {
+  const t = raw.tracker, e = raw.edit;
+  return {
+    owners: e.owners.map((o) => ({ ...o })),
+    accounts: t.accounts.map((a, i) => ({ ...e.accounts[i], name: a.name, owner: a.owner, rawCategory: a.rawCategory, status: a.status })),
+    snaps: t.dates.map((d, k) => ({ id: e.snapshotIds[k], date: d, values: t.rows[k].slice() })),
+  };
+}
+
+const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const localIsDate = (d) => typeof d === "string" && LOCAL_DATE.test(d) && !Number.isNaN(new Date(d + "T00:00:00Z").getTime())
+  && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
+const LOCAL_RATE_TYPES = ["Cash", "Credit card", "Loan", "Mortgage"];
+function localText(v, what, max, optional) {
+  if (v === null || v === undefined || (typeof v === "string" && !v.trim())) { if (optional) return null; throw new Error(`${what} can't be empty.`); }
+  if (typeof v !== "string") throw new Error(`${what} couldn't be read.`);
+  const t = v.trim();
+  if (t.length > max) throw new Error(`${what} is too long (${max} characters at most).`);
+  return t;
+}
+function localNumber(v, what, lo, hi) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < lo || v > hi) throw new Error(`${what} must be a number from ${lo} to ${hi}.`);
+  return v;
+}
+
+/** Applies one kept edit (an API call) to the state, checking it the way the server would. Returns its result. */
+function applyOp(S, op) {
+  const { method, path } = op, body = op.body || {};
+  const snapAt = (id) => { const k = S.snaps.findIndex((s) => s.id === id); if (k < 0) throw new Error("That snapshot doesn't exist any more. Reload and try again."); return k; };
+  const balances = () => {
+    if (!Array.isArray(body.balances)) throw new Error("Expected a list of balances.");
+    const seen = new Set();
+    return body.balances.map(([id, v]) => {
+      const i = S.accounts.findIndex((a) => a.id === id);
+      if (i < 0) throw new Error("A balance is for an account that doesn't exist any more. Reload and try again.");
+      if (seen.has(i)) throw new Error("An account appears twice.");
+      seen.add(i);
+      if (v !== null && !(typeof v === "number" && Number.isFinite(v) && Math.abs(v) < 1e13)) throw new Error("Balances must be numbers, or blank to carry the last one forward.");
+      return [i, v];
+    });
+  };
+  const needsOne = (values) => { if (!values.some((v) => v !== null && v !== 0)) throw new Error("A snapshot needs at least one balance that isn't $0. Delete it instead if it's not needed."); };
+  let m;
+  if (method === "POST" && path === "/api/snapshots") {
+    if (!localIsDate(body.date)) throw new Error("Pick a valid date.");
+    if (S.snaps.some((s) => s.date === body.date)) throw new Error("There's already a snapshot on that date. Edit it instead.");
+    const values = S.accounts.map(() => null);
+    balances().forEach(([i, v]) => { values[i] = v; });
+    needsOne(values);
+    S.snaps.push({ id: op.id, date: body.date, values });
+    return { id: op.id };
+  }
+  if (method === "PUT" && (m = path.match(/^\/api\/snapshots\/(\d+)$/))) {
+    const k = snapAt(+m[1]);
+    if (!localIsDate(body.date)) throw new Error("Pick a valid date.");
+    if (S.snaps.some((s, j) => j !== k && s.date === body.date)) throw new Error("There's already another snapshot on that date.");
+    const values = S.snaps[k].values.slice();
+    balances().forEach(([i, v]) => { values[i] = v; });
+    needsOne(values);
+    S.snaps[k] = { ...S.snaps[k], date: body.date, values };
+    return {};
+  }
+  if (method === "DELETE" && (m = path.match(/^\/api\/snapshots\/(\d+)$/))) {
+    const k = snapAt(+m[1]);
+    if (S.snaps.length === 1) throw new Error("That's the only snapshot left.");
+    S.snaps.splice(k, 1);
+    return {};
+  }
+  if (method === "PUT" && path === "/api/accounts/status") {
+    const changes = body.changes;
+    if (!Array.isArray(changes) || !changes.length) throw new Error("Expected a list of account statuses.");
+    changes.forEach(([id, status]) => {
+      const a = S.accounts.find((x) => x.id === id);
+      if (!a) throw new Error("That account doesn't exist any more. Reload and try again.");
+      if (status !== null && status !== "open" && status !== "closed") throw new Error("Status must be Automatic, Open or Closed.");
+      a.status = status;
+    });
+    return {};
+  }
+  if (method === "PUT" && (m = path.match(/^\/api\/accounts\/(\d+)$/))) {
+    const a = S.accounts.find((x) => x.id === +m[1]);
+    if (!a) throw new Error("That account doesn't exist any more. Reload and try again.");
+    const name = localText(body.name, "The account name", 200);
+    if (name.toLowerCase() === "total") throw new Error(`"Total" is reserved for the workbook's total column. Pick another name.`);
+    if (S.accounts.some((x) => x !== a && x.name.toLowerCase() === name.toLowerCase())) throw new Error(`There's already an account called "${name}".`);
+    const custom = S.accounts.map((x) => x.rawCategory).filter((c) => c && !MODEL.ASSET_TYPES.includes(c) && !["liability", "liabilities", "debt"].includes(c.toLowerCase()));
+    if (typeof body.type !== "string" || ![...MODEL.ASSET_TYPES, ...MODEL.DEBT_TYPES, ...custom].includes(body.type)) throw new Error("Pick a type for the account.");
+    const owner = S.owners.find((o) => o.id === body.ownerId);
+    if (!owner) throw new Error("Pick who owns the account (a person, or Joint).");
+    // An owner is a header colour in the workbook, so the new one has to be on some account's header already.
+    if (owner.name !== a.owner && !LOCAL.raw.tracker.accounts.some((x) => x.owner === owner.name)) {
+      throw new Error(`No account in the workbook has ${owner.name}'s colour yet, so this can't be saved there. Colour the account's header in the workbook instead.`);
+    }
+    let last4 = body.last4 === null || body.last4 === undefined || body.last4 === "" ? null : String(body.last4).trim();
+    if (last4 !== null && !/^\d{4}$/.test(last4)) throw new Error("Last 4 digits must be exactly 4 digits. Never enter the full number.");
+    const status = body.status === null || body.status === undefined || body.status === "" ? null : body.status;
+    if (status !== null && status !== "open" && status !== "closed") throw new Error("Status must be Automatic, Open or Closed.");
+    Object.assign(a, {
+      name, owner: owner.name, ownerId: owner.id, type: body.type, rawCategory: MODEL.categoryForType(body.type),
+      institution: localText(body.institution, "The institution", 80, true), last4,
+      notes: localText(body.notes, "The notes", 500, true), status,
+      creditLimit: body.type === "Credit card" ? localNumber(body.creditLimit, "The credit limit", 0, 1e9) : null,
+      interestRate: LOCAL_RATE_TYPES.includes(body.type) ? localNumber(body.interestRate, "The interest rate", 0, 100) : null,
+    });
+    return {};
+  }
+  throw new Error("That isn't available on the local dashboard. Change it in the workbook instead.");
+}
+
+/** What Save writes, to tell whether a workbook already has the edits. */
+const stateKey = (S) => ({
+  accounts: S.accounts.map((a) => [a.name, a.owner, a.rawCategory, a.status, a.type, a.institution, a.last4, a.notes, a.creditLimit, a.interestRate]),
+  snaps: S.snaps.map((x) => [x.date, x.values]).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)),
+});
+
+/** DATA as the hosted page would see it, from the state: the rules redone by model.js. */
+function localData(raw, S) {
+  const order = S.snaps.map((s, k) => [s, k]).sort((x, y) => (x[0].date < y[0].date ? -1 : x[0].date > y[0].date ? 1 : x[1] - y[1])).map((x) => x[0]);
+  S.snaps = order;
+  const tracker = {
+    owners: S.owners.map((o) => o.name),
+    accounts: S.accounts.map((a) => ({ name: a.name, owner: a.owner, rawCategory: a.rawCategory, status: a.status })),
+    dates: S.snaps.map((s) => s.date),
+    rows: S.snaps.map((s) => s.values),
+  };
+  const built = MODEL.buildData(tracker, { source: raw.source, generated: raw.generated });
+  // Each account's type, the one set or a best guess, as the hosted server sends it.
+  built.accounts.forEach((a, i) => { a.type = MODEL.typeOf(a, S.accounts[i].type); });
+  return {
+    ...raw, ...built,
+    edit: {
+      snapshotIds: S.snaps.map((s) => s.id),
+      accounts: S.accounts.map((a) => ({ id: a.id, ownerId: a.ownerId, rawCategory: a.rawCategory, type: a.type, institution: a.institution,
+        last4: a.last4, notes: a.notes, status: a.status, creditLimit: a.creditLimit, interestRate: a.interestRate })),
+      owners: S.owners.map((o) => ({ ...o })),
+    },
+  };
+}
+
+/** Called once, as DATA is defined: replays this browser's kept edits onto a locally built dashboard. */
+function withLocalEdits(raw) {
+  if (!raw || !raw.local || !MODEL) return raw;
+  let store = readLocal(raw);
+  if (store && store.savedAt && raw.builtAt > store.savedAt) {
+    // Rebuilt since Save. If replaying the edits changes nothing, they're in the workbook now and can go;
+    // if not (say the downloaded workbook was never put in place), they're kept, to save again.
+    const probe = localState(raw), before = JSON.stringify(stateKey(probe));
+    LOCAL = { raw, store, state: probe, dropped: 0 };
+    for (const op of store.ops) { try { applyOp(probe, op); } catch (e) { /* already there */ } }
+    if (JSON.stringify(stateKey(probe)) === before) { writeLocal(raw, null); store = null; }
+    else { store.savedAt = null; store.notInWorkbook = true; writeLocal(raw, store); }
+  }
+  store = store || { ops: [], savedAt: null, nextId: 1000000 };
+  const state = localState(raw), kept = [];
+  LOCAL = { raw, store, state, dropped: 0 };
+  for (const op of store.ops) {
+    try { applyOp(state, op); kept.push(op); } catch (e) { LOCAL.dropped++; }
+  }
+  if (LOCAL.dropped) { store.ops = kept; writeLocal(raw, store); }
+  return localData(raw, state);
+}
+
+/** The local stand-in for the server: checks and keeps the edit, or throws with what to show. */
+async function localApi(method, path, body) {
+  if (LOCAL.store.savedAt) {
+    throw new Error("These changes are saved to the workbook. Rebuild the dashboard from it before changing anything else: open it from the launcher, or run build_dashboard.py.");
+  }
+  const op = { method, path, body: body === undefined ? null : JSON.parse(JSON.stringify(body)) };
+  if (method === "POST" && path === "/api/snapshots") op.id = LOCAL.store.nextId = (LOCAL.store.nextId || 1000000) + 1;
+  const out = applyOp(LOCAL.state, op);
+  LOCAL.store.ops.push(op);
+  if (!writeLocal(LOCAL.raw, LOCAL.store)) {
+    LOCAL.store.ops.pop();
+    throw new Error("This browser wouldn't keep the change (its storage is full or blocked), so nothing was changed.");
+  }
+  return out || {};
+}
+
+const DATA = withLocalEdits(/*__DATA__*/null);
 
 /* ── color roles ───────────────────────────────────────────────────────────
    Every set below was checked with the data-viz palette validator (lightness
@@ -4301,11 +4524,11 @@ const VIEWS = {
   spending: { title: titled("Spending"), intro: "Money in and out each month, from the balances you already record.", hash: "#spending" },
   transactions: { title: titled("Transactions"), intro: "Follow the everyday details of what comes in, goes out, and moves between you.", hash: "#transactions" },
   goals: { title: titled("Goals"), intro: "Turn what's left today into what you're building for tomorrow.", hash: "#goals", noFilters: true },
-  settings: { title: titled("Settings"), intro: "Your household, the people in it, and help with the dashboard.", hash: "#settings", noFilters: true },
+  settings: { title: titled("Settings"), intro: LOCAL ? "Hidden accounts, and help with the dashboard." : "Your household, the people in it, and help with the dashboard.", hash: "#settings", noFilters: true },
 };
 const viewFromHash = () => Object.keys(VIEWS).find((v) => VIEWS[v].hash && VIEWS[v].hash === location.hash) || "dash";
 function setView(view) {
-  if (!VIEWS[view] || (view === "settings" && !DATA.household) || ((view === "accounts" || view === "transactions") && !(DATA.hosted && DATA.edit))) view = "dash";
+  if (!VIEWS[view] || (view === "settings" && !DATA.household && !LOCAL) || (view === "accounts" && !EDIT) || (view === "transactions" && !(DATA.hosted && DATA.edit))) view = "dash";
   state.view = view;
   Object.keys(VIEWS).forEach((v) => { document.getElementById(v + "View").hidden = v !== view; });
   document.querySelectorAll(".nav-item[data-view]").forEach((b) => {
@@ -4338,8 +4561,8 @@ function renderEntries() {
   document.getElementById("entOlder").disabled = state.entPage >= pages - 1;
   const hidden = counted().length - list.length;
   document.getElementById("entNote").textContent =
-    (DATA.hosted
-      ? "Click a snapshot to change it, or add a new one."
+    (EDIT
+      ? "Click a snapshot to change it, or add a new one." + (LOCAL ? " Changes stay in this browser until you save them to the workbook." : "")
       : "To add or change an entry, edit the workbook and rebuild.")
     + (list.some((a) => rows.some((i) => a.carriedSet.has(i))) ? " Grey italic values were left blank and carry the previous entry forward." : "")
     + (hidden ? ` ${plural(hidden, hiddenNoun())} not shown as a column.` : "");
@@ -4373,11 +4596,12 @@ function buildEntries() {
    DATA.edit carries database ids in DATA's own order. Every save goes to the
    Worker API and then reloads the page, so Overview, Projection and this list
    are all recomputed from the database in one place (src/model.js). */
-const EDIT = DATA.hosted && DATA.edit ? DATA.edit : null;
+const EDIT = (DATA.hosted || LOCAL) && DATA.edit ? DATA.edit : null;
 const FLASH_KEY = "nw-flash";
 const $id = (id) => document.getElementById(id);
 
 async function api(method, path, body) {
+  if (LOCAL) return localApi(method, path, body);   // the local dashboard: kept in this browser
   let res;
   try {
     res = await fetch(path, {
@@ -4392,6 +4616,403 @@ async function api(method, path, body) {
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || `The server refused the change (${res.status}).`);
   return out;
+}
+
+/* ── Save to workbook (local dashboard) ───────────────────────────────────
+   Writes this browser's kept edits into the .xlsx the dashboard was built from:
+   only the cells that changed on the balances sheet (its formatting, formulas and
+   other sheets are left as they are), plus an "Accounts" sheet with each account's
+   details and Open/Closed status. New snapshots go below the last row, copying its
+   formats and its Total formula. Before writing, it checks the workbook still
+   matches what the dashboard was built from, so it never writes over changes made
+   in Excel since. Chrome and Edge write straight into the workbook's folder (after
+   you pick it once), with the old file kept in "Workbook backups"; other browsers
+   download the updated workbook to put in place of the old one. */
+const XML_NS = {
+  main: "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+  rel: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+  pkg: "http://schemas.openxmlformats.org/package/2006/relationships",
+  types: "http://schemas.openxmlformats.org/package/2006/content-types",
+};
+const XML_HEAD = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32Of = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+
+/** The entries of a zip (an .xlsx), each still compressed as it was. */
+function readZip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), dec = new TextDecoder();
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  if (end < 0) throw new Error("That file isn't a workbook (.xlsx).");
+  const count = dv.getUint16(end + 10, true), out = [];
+  let p = dv.getUint32(end + 16, true);
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("The workbook couldn't be read (its zip directory is damaged).");
+    const method = dv.getUint16(p + 10, true), crc = dv.getUint32(p + 16, true), csize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true);
+    const nlen = dv.getUint16(p + 28, true), elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), at = dv.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nlen));
+    const start = at + 30 + dv.getUint16(at + 26, true) + dv.getUint16(at + 28, true);
+    out.push({ name, method, crc, csize, size, raw: bytes.subarray(start, start + csize) });
+    p += 46 + nlen + elen + clen;
+  }
+  return out;
+}
+async function zipEntryText(e) {
+  if (e.method === 0) return new TextDecoder().decode(e.raw);
+  if (e.method !== 8 || typeof DecompressionStream === "undefined") throw new Error("This browser can't read the workbook's compression. Try Chrome, Edge, Safari 16.4+ or Firefox 113+.");
+  const stream = new Blob([e.raw]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+}
+/** A zip again: entries with `text` are stored as new; the rest are copied exactly as they were. */
+function writeZip(entries) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (const e of entries) {
+    const nameB = enc.encode(e.name);
+    let data = e.raw, method = e.method, crc = e.crc, size = e.size;
+    if (e.text !== undefined) { data = enc.encode(e.text); method = 0; crc = crc32Of(data); size = data.length; }
+    const head = new DataView(new ArrayBuffer(30)), dir = new DataView(new ArrayBuffer(46));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, method, 2], [10, 0, 2], [12, 0x21, 2], [14, crc, 4], [18, data.length, 4], [22, size, 4], [26, nameB.length, 2], [28, 0, 2]]
+      .forEach(([at, v, n]) => (n === 4 ? head.setUint32(at, v, true) : head.setUint16(at, v, true)));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, method, 2], [12, 0, 2], [14, 0x21, 2], [16, crc, 4], [20, data.length, 4], [24, size, 4],
+     [28, nameB.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]]
+      .forEach(([at, v, n]) => (n === 4 ? dir.setUint32(at, v, true) : dir.setUint16(at, v, true)));
+    parts.push(new Uint8Array(head.buffer), nameB, data);
+    central.push(new Uint8Array(dir.buffer), nameB);
+    offset += 30 + nameB.length + data.length;
+  }
+  const dirSize = central.reduce((n, b) => n + b.length, 0), end = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, entries.length, 2], [10, entries.length, 2], [12, dirSize, 4], [16, offset, 4], [20, 0, 2]]
+    .forEach(([at, v, n]) => (n === 4 ? end.setUint32(at, v, true) : end.setUint16(at, v, true)));
+  const out = new Uint8Array(offset + dirSize + 22);
+  let p = 0;
+  for (const b of parts.concat(central, [new Uint8Array(end.buffer)])) { out.set(b, p); p += b.length; }
+  return out;
+}
+
+const parseXml = (text, what) => {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) throw new Error(`The workbook's ${what} couldn't be read.`);
+  return doc;
+};
+const xmlOut = (doc) => XML_HEAD + new XMLSerializer().serializeToString(doc.documentElement);
+const kids = (el, name) => [...el.childNodes].filter((n) => n.nodeType === 1 && n.localName === name);
+const kid = (el, name) => kids(el, name)[0] || null;
+const colName = (n) => { let s = ""; for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
+const colOf = (ref) => [...ref.match(/^[A-Z]+/)[0]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+const rowOf = (ref) => +ref.match(/\d+$/)[0];
+/** Moves a formula's relative row references by `delta` rows, as Excel does when it copies one down. */
+const shiftFormula = (f, delta) => f.replace(/(\$?)([A-Z]{1,3})(\$?)(\d+)(?![\d(])/g, (m, d1, c, d2, r) => (d2 ? m : `${d1}${c}${d2}${+r + delta}`));
+
+/** A sheet's cells, to read and change in place. */
+function sheetCells(doc, strings) {
+  const root = doc.documentElement, pfx = root.prefix ? root.prefix + ":" : "";
+  const make = (name) => doc.createElementNS(XML_NS.main, pfx + name);
+  const data = kid(root, "sheetData");
+  const rows = new Map(kids(data, "row").map((r) => [+r.getAttribute("r"), r]));
+  const row = (r, create) => {
+    if (rows.has(r) || !create) return rows.get(r) || null;
+    const el = make("row"); el.setAttribute("r", String(r));
+    const after = [...rows.keys()].filter((k) => k > r).sort((a, b) => a - b)[0];
+    data.insertBefore(el, after === undefined ? null : rows.get(after));
+    rows.set(r, el);
+    return el;
+  };
+  const cell = (r, c, create) => {
+    const rowEl = row(r, create);
+    if (!rowEl) return null;
+    const cells = kids(rowEl, "c");
+    const found = cells.find((x) => colOf(x.getAttribute("r")) === c);
+    if (found || !create) return found || null;
+    const el = make("c"); el.setAttribute("r", colName(c) + r);
+    rowEl.insertBefore(el, cells.find((x) => colOf(x.getAttribute("r")) > c) || null);
+    return el;
+  };
+  const value = (c) => {
+    if (!c) return null;
+    const t = c.getAttribute("t"), v = kid(c, "v");
+    if (t === "inlineStr") { const is = kid(c, "is"); return is ? [...is.getElementsByTagNameNS(XML_NS.main, "t")].map((x) => x.textContent).join("") : null; }
+    if (!v) return null;
+    if (t === "s") return strings[+v.textContent];
+    if (t === "str" || t === "e") return v.textContent;
+    if (t === "b") return v.textContent === "1";
+    return Number(v.textContent);
+  };
+  const clear = (c) => { [...c.childNodes].forEach((n) => c.removeChild(n)); c.removeAttribute("t"); };
+  const setNumber = (c, v) => { clear(c); const el = make("v"); el.textContent = String(v); c.appendChild(el); };
+  const setText = (c, text) => {
+    clear(c); c.setAttribute("t", "inlineStr");
+    const is = make("is"), t = make("t");
+    t.textContent = text;
+    if (/^\s|\s$/.test(text)) t.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+    is.appendChild(t); c.appendChild(is);
+  };
+  const setFormula = (c, f) => { clear(c); const el = make("f"); el.textContent = f; c.appendChild(el); };
+  return { root, rows, row, cell, value, clear, setNumber, setText, setFormula };
+}
+
+/** The Accounts sheet: one row per account with its details, in the workbook's column order. */
+function accountsSheetXml(S) {
+  const head = ["Name", "Type", "Institution", "Last 4", "Notes", "Status", "Credit limit", "Interest rate"];
+  const txt = (r, c, s) => (s === null || s === undefined || s === "" ? "" : `<c r="${colName(c)}${r}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(s)}</t></is></c>`);
+  const num = (r, c, v) => (typeof v === "number" ? `<c r="${colName(c)}${r}"><v>${v}</v></c>` : "");
+  const rows = [`<row r="1">${head.map((h, k) => txt(1, k + 1, h)).join("")}</row>`].concat(S.accounts.map((a, k) => {
+    const r = k + 2;
+    return `<row r="${r}">${txt(r, 1, a.name)}${txt(r, 2, a.type)}${txt(r, 3, a.institution)}${txt(r, 4, a.last4)}${txt(r, 5, a.notes)}`
+      + `${txt(r, 6, a.status === "open" ? "Open" : a.status === "closed" ? "Closed" : "")}${num(r, 7, a.creditLimit)}${num(r, 8, a.interestRate)}</row>`;
+  }));
+  return XML_HEAD + `<worksheet xmlns="${XML_NS.main}"><cols><col min="1" max="1" width="24" customWidth="1"/><col min="2" max="8" width="16" customWidth="1"/></cols>`
+    + `<sheetData>${rows.join("")}</sheetData></worksheet>`;
+}
+const hasDetails = (a) => ["type", "institution", "last4", "notes", "status", "creditLimit", "interestRate"].some((f) => a[f] !== null && a[f] !== undefined);
+
+/** The workbook's bytes with this browser's edits written in. Throws if it no longer matches the build. */
+async function patchWorkbook(bytes) {
+  const raw = LOCAL.raw, S = LOCAL.state, sh = raw.sheet;
+  const entries = readZip(bytes), byName = new Map(entries.map((e) => [e.name, e]));
+  const text = async (name) => (byName.has(name) ? zipEntryText(byName.get(name)) : null);
+  const changed = new Map();   // entry name → new text (null: remove it)
+
+  const wb = parseXml(await text("xl/workbook.xml") || "", "contents");
+  const relsName = "xl/_rels/workbook.xml.rels", rels = parseXml(await text(relsName) || "", "contents");
+  const relTarget = new Map(kids(rels.documentElement, "Relationship").map((r) => [r.getAttribute("Id"), r.getAttribute("Target")]));
+  const partOf = (target) => (target.startsWith("/") ? target.slice(1) : "xl/" + target.replace(/^\.\//, ""));
+  const sheetsEl = kid(wb.documentElement, "sheets"), sheetEls = kids(sheetsEl, "sheet");
+  const sheetPart = (el) => partOf(relTarget.get(el.getAttributeNS(XML_NS.rel, "id")) || "");
+  if (!sheetEls.length || sheetEls[0].getAttribute("name") !== sh.name) {
+    throw new Error(`The workbook's first sheet isn't "${sh.name}" any more. Rebuild the dashboard from it first; your changes stay in this browser.`);
+  }
+  const pr = kid(wb.documentElement, "workbookPr"), d1904 = pr && /^(1|true)$/.test(pr.getAttribute("date1904") || "");
+  const epoch = d1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
+  const serialOf = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - epoch) / 864e5;
+  const isoOf = (n) => new Date(epoch + Math.floor(n) * 864e5).toISOString().slice(0, 10);
+
+  const strings = [];
+  const sst = await text("xl/sharedStrings.xml");
+  if (sst) kids(parseXml(sst, "text").documentElement, "si").forEach((si) => strings.push([...si.getElementsByTagNameNS(XML_NS.main, "t")]
+    .filter((t) => !t.parentNode || t.parentNode.localName !== "rPh").map((t) => t.textContent).join("")));
+  const mainPart = sheetPart(sheetEls[0]);
+  const doc = parseXml(await text(mainPart) || "", "balances sheet"), X = sheetCells(doc, strings);
+
+  // Still the workbook this dashboard was built from?
+  const stale = (what) => new Error(`The workbook has changed since this dashboard was built (${what}). Rebuild the dashboard from it first; your changes stay in this browser.`);
+  raw.tracker.accounts.forEach((a, i) => {
+    const v = X.value(X.cell(sh.headerRow, sh.cols[i]));
+    if (typeof v !== "string" || v.trim() !== a.name) throw stale(`column ${colName(sh.cols[i])} isn't "${a.name}"`);
+  });
+  raw.tracker.dates.forEach((d, k) => {
+    const v = X.value(X.cell(sh.rows[k], 1));
+    if (typeof v !== "number" || isoOf(v) !== d) throw stale(`row ${sh.rows[k]} isn't ${d}`);
+  });
+
+  // Account names, owners (the header's colour) and typed categories (row 3).
+  S.accounts.forEach((a, i) => {
+    const was = raw.tracker.accounts[i], col = sh.cols[i], head = X.cell(sh.headerRow, col, true);
+    if (a.name !== was.name) X.setText(head, a.name);
+    if (a.owner !== was.owner) {
+      const like = raw.tracker.accounts.findIndex((x) => x.owner === a.owner), from = like >= 0 ? X.cell(sh.headerRow, sh.cols[like]) : null;
+      if (from && from.getAttribute("s")) head.setAttribute("s", from.getAttribute("s")); else head.removeAttribute("s");
+    }
+    if (a.rawCategory !== was.rawCategory && sh.categories[i]) X.setText(X.cell(sh.headerRow - 1, col, true), a.rawCategory);
+  });
+
+  // Snapshots: changed cells, deleted rows emptied, new rows below the last one.
+  const lastRow = Math.max(...sh.rows), tpl = (c) => X.cell(lastRow, c);
+  const cols = [1, ...sh.cols, ...(sh.totalCol ? [sh.totalCol] : [])];
+  const put = (r, i, v) => {
+    const c = X.cell(r, sh.cols[i], true);
+    if (v === null) X.clear(c); else X.setNumber(c, v);
+  };
+  const finalById = new Map(S.snaps.map((s) => [s.id, s]));
+  raw.tracker.dates.forEach((d, k) => {
+    const r = sh.rows[k], now = finalById.get(raw.edit.snapshotIds[k]);
+    if (!now) { cols.forEach((c) => { const x = X.cell(r, c); if (x) X.clear(x); }); return; }
+    if (now.date !== d) X.setNumber(X.cell(r, 1, true), serialOf(now.date));
+    now.values.forEach((v, i) => { if (v !== raw.tracker.rows[k][i]) put(r, i, v); });
+  });
+  let next = Math.max(lastRow, sh.lastRow);
+  const totalTpl = sh.totalCol ? tpl(sh.totalCol) : null;
+  let totalF = null, totalBase = lastRow;
+  const tf = totalTpl && kid(totalTpl, "f");
+  if (tf && tf.textContent) totalF = tf.textContent;
+  else if (tf && tf.getAttribute("t") === "shared") {
+    const master = [...doc.getElementsByTagNameNS(XML_NS.main, "f")].find((f) => f.getAttribute("t") === "shared" && f.getAttribute("si") === tf.getAttribute("si") && f.textContent);
+    if (master) { totalF = master.textContent; totalBase = rowOf(master.parentNode.getAttribute("r")); }
+  }
+  const added = S.snaps.filter((s) => !raw.edit.snapshotIds.includes(s.id));
+  for (const s of added) {
+    const r = ++next, styleOf = (c) => { const t = tpl(c); return t && t.getAttribute("s"); };
+    const a = X.cell(r, 1, true);
+    if (styleOf(1)) a.setAttribute("s", styleOf(1));
+    X.setNumber(a, serialOf(s.date));
+    s.values.forEach((v, i) => {
+      if (v === null && !styleOf(sh.cols[i])) return;
+      const c = X.cell(r, sh.cols[i], true);
+      if (styleOf(sh.cols[i])) c.setAttribute("s", styleOf(sh.cols[i]));
+      if (v !== null) X.setNumber(c, v);
+    });
+    if (totalF) {
+      const c = X.cell(r, sh.totalCol, true);
+      if (styleOf(sh.totalCol)) c.setAttribute("s", styleOf(sh.totalCol));
+      X.setFormula(c, shiftFormula(totalF, r - totalBase));
+    }
+  }
+  const dim = kid(X.root, "dimension");
+  if (dim && added.length) dim.setAttribute("ref", dim.getAttribute("ref").replace(/(\d+)$/, (m) => String(Math.max(+m, next))));
+  changed.set(mainPart, xmlOut(doc));
+
+  // The Accounts sheet: replaced if there is one, added if any account has details.
+  const accountsEl = sheetEls.slice(1).find((el) => el.getAttribute("name").trim().toLowerCase() === "accounts");
+  if (accountsEl) changed.set(sheetPart(accountsEl), accountsSheetXml(S));
+  else if (S.accounts.some(hasDetails)) {
+    const part = "xl/worksheets/nw-accounts.xml", id = "rIdNwAccounts";
+    const el = wb.createElementNS(XML_NS.main, (wb.documentElement.prefix ? wb.documentElement.prefix + ":" : "") + "sheet");
+    el.setAttribute("name", "Accounts");
+    el.setAttribute("sheetId", String(Math.max(...sheetEls.map((x) => +x.getAttribute("sheetId") || 0)) + 1));
+    el.setAttributeNS(XML_NS.rel, "r:id", id);
+    sheetsEl.appendChild(el);
+    const rel = rels.createElementNS(XML_NS.pkg, "Relationship");
+    rel.setAttribute("Id", id); rel.setAttribute("Type", XML_NS.rel + "/worksheet"); rel.setAttribute("Target", "worksheets/nw-accounts.xml");
+    rels.documentElement.appendChild(rel);
+    const types = parseXml(await text("[Content_Types].xml") || "", "contents");
+    const ov = types.createElementNS(XML_NS.types, "Override");
+    ov.setAttribute("PartName", "/" + part); ov.setAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml");
+    types.documentElement.appendChild(ov);
+    changed.set("[Content_Types].xml", xmlOut(types));
+    changed.set(part, accountsSheetXml(S));
+  }
+
+  // Excel recalculates every formula when it opens the file (the Total column included).
+  if (byName.has("xl/calcChain.xml")) {
+    changed.set("xl/calcChain.xml", null);
+    kids(rels.documentElement, "Relationship").filter((r) => /\/calcChain$/.test(r.getAttribute("Type"))).forEach((r) => r.parentNode.removeChild(r));
+    const types = parseXml(changed.get("[Content_Types].xml") || await text("[Content_Types].xml") || "", "contents");
+    kids(types.documentElement, "Override").filter((o) => o.getAttribute("PartName") === "/xl/calcChain.xml").forEach((o) => o.parentNode.removeChild(o));
+    changed.set("[Content_Types].xml", xmlOut(types));
+  }
+  let calc = kid(wb.documentElement, "calcPr");
+  if (!calc) {
+    calc = wb.createElementNS(XML_NS.main, (wb.documentElement.prefix ? wb.documentElement.prefix + ":" : "") + "calcPr");
+    const before = ["sheets", "functionGroups", "externalReferences", "definedNames"].map((n) => kid(wb.documentElement, n)).filter(Boolean).pop();
+    wb.documentElement.insertBefore(calc, before.nextSibling);
+  }
+  calc.setAttribute("fullCalcOnLoad", "1");
+  changed.set("xl/workbook.xml", xmlOut(wb));
+  changed.set(relsName, xmlOut(rels));
+
+  const out = entries.filter((e) => changed.get(e.name) !== null).map((e) => (changed.has(e.name) ? { name: e.name, text: changed.get(e.name) } : e));
+  for (const [name, t] of changed) if (t !== null && !byName.has(name)) out.push({ name, text: t });
+  return writeZip(out);
+}
+
+/* The workbook's folder, remembered between visits (Chrome and Edge). */
+function folderStore(mode, fn) {
+  return new Promise((resolve) => {
+    try {
+      const open = indexedDB.open("nw-local", 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("handles");
+      open.onerror = () => resolve(null);
+      open.onsuccess = () => {
+        try {
+          const tx = open.result.transaction("handles", mode), req = fn(tx.objectStore("handles"));
+          tx.oncomplete = () => resolve(req && req.result !== undefined ? req.result : null);
+          tx.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      };
+    } catch (e) { resolve(null); }
+  });
+}
+const savedFolder = () => folderStore("readonly", (s) => s.get("folder"));
+const keepFolder = (dir) => folderStore("readwrite", (s) => s.put(dir, "folder"));
+const forgetFolder = () => folderStore("readwrite", (s) => s.delete("folder"));
+
+/** Other browsers: pick the workbook file each time. */
+function pickWorkbookFile() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = ".xlsx";
+    input.addEventListener("change", async () => {
+      const f = input.files[0];
+      if (!f) return reject(new Error("No workbook was picked, so nothing was saved."));
+      resolve(new Uint8Array(await f.arrayBuffer()));
+    });
+    input.addEventListener("cancel", () => reject(new Error("No workbook was picked, so nothing was saved.")));
+    input.click();
+  });
+}
+
+async function saveToWorkbook() {
+  let dir = null, file = null, bytes;
+  if (window.showDirectoryPicker) {
+    dir = await savedFolder();
+    if (dir) {
+      const ok = (await dir.queryPermission({ mode: "readwrite" })) === "granted" || (await dir.requestPermission({ mode: "readwrite" })) === "granted";
+      if (!ok) dir = null;
+    }
+    if (!dir) {
+      try { dir = await window.showDirectoryPicker({ id: "nw-workbook", mode: "readwrite" }); }
+      catch (e) { throw new Error("No folder was picked, so nothing was saved."); }
+    }
+    try { file = await dir.getFileHandle(DATA.source); }
+    catch (e) { await forgetFolder(); throw new Error(`There's no ${DATA.source} in the folder "${dir.name}". Save again and pick the folder the workbook is in.`); }
+    await keepFolder(dir);
+    bytes = new Uint8Array(await (await file.getFile()).arrayBuffer());
+  } else {
+    bytes = await pickWorkbookFile();
+  }
+  const out = await patchWorkbook(bytes);
+  if (dir) {
+    const backups = await dir.getDirectoryHandle("Workbook backups", { create: true });
+    const stamp = new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, "-");
+    const copy = await backups.getFileHandle(`${DATA.source.replace(/\.xlsx$/i, "")} ${stamp}.xlsx`, { create: true });
+    let w = await copy.createWritable(); await w.write(bytes); await w.close();
+    w = await file.createWritable(); await w.write(out); await w.close();
+  } else {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = DATA.source;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+  LOCAL.store.savedAt = Date.now();
+  LOCAL.store.savedTo = dir ? "folder" : "download";
+  writeLocal(LOCAL.raw, LOCAL.store);
+  return !!dir;
+}
+
+/* The bar at the top of a local dashboard with unsaved edits. */
+function renderLocalBar() {
+  const bar = $id("localBar");
+  if (!LOCAL) { bar.hidden = true; return; }
+  const n = LOCAL.store.ops.length, s = LOCAL.store;
+  const lost = LOCAL.dropped ? ` ${plural(LOCAL.dropped, "kept change")} no longer fit the workbook and ${LOCAL.dropped === 1 ? "was" : "were"} dropped.` : "";
+  bar.hidden = !n && !LOCAL.dropped;
+  $id("localSave").hidden = $id("localDiscard").hidden = !n || !!s.savedAt;
+  $id("localBarText").innerHTML = s.savedAt
+    ? `<b>Saved to ${esc(DATA.source)}.</b> ${s.savedTo === "download" ? "Put the downloaded workbook in place of the old one, then rebuild" : "Rebuild"}`
+      + ` the dashboard to keep editing: open it from the launcher, or run <code>build_dashboard.py</code>.${lost}`
+    : n ? `<b>${plural(n, "change")} kept in this browser</b>, not in ${esc(DATA.source)} yet.`
+      + (s.notInWorkbook ? " They were saved once, but this dashboard was built from a workbook without them." : "")
+      + ` Close the workbook in Excel, then save.${lost}` : lost.trim();
+}
+function buildLocalBar() {
+  if (!LOCAL) return;
+  renderLocalBar();
+  $id("localSave").addEventListener("click", async () => {
+    const st = $id("localStatus");
+    $id("localSave").disabled = true; st.classList.remove("bad"); st.textContent = "Saving…";
+    try {
+      const direct = await saveToWorkbook();
+      st.textContent = direct ? "Saved. The old workbook is in “Workbook backups”." : "Downloaded the updated workbook.";
+      renderLocalBar();
+    } catch (err) { st.textContent = err.message; st.classList.add("bad"); }
+    $id("localSave").disabled = false;
+  });
+  $id("localDiscard").addEventListener("click", async () => {
+    if (!(await ask(`Discard ${plural(LOCAL.store.ops.length, "change")}?`, "They're only in this browser, so they can't be brought back.", "Discard"))) return;
+    writeLocal(LOCAL.raw, null);
+    location.reload();
+  });
 }
 
 /* Settings → Closed and hidden accounts (#7). The app hides an account by its balances (closed: $0 for the
@@ -4424,7 +5045,7 @@ function renderClosedAccounts() {
   $id("closedSave").parentElement.hidden = !rows.length;
 }
 function buildClosedAccounts() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
   renderClosedAccounts();
   const changes = () => [...$id("closedList").querySelectorAll("[data-closed]")].map((box) => {
     const i = +box.dataset.closed, a = DATA.accounts[i], d = EDIT.accounts[i];
@@ -5053,7 +5674,7 @@ function renderOwnersBar() {
 }
 
 function renderAccounts() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
   renderAcctKpis();
   renderAcctTable();
   renderOwnersBar();
@@ -5191,7 +5812,8 @@ async function importAccountsFile(file) {
 }
 
 function buildAccounts() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
+  if (LOCAL) $id("acctAdd").hidden = $id("acctImportBtn").hidden = true;   // new accounts are columns in the workbook
   const types = [...new Set(DATA.accounts.map(typeName))];
   $id("acctType").innerHTML = `<option value="">All types</option>` + types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
   $id("acctSearch").addEventListener("input", renderAcctTable);
@@ -5314,6 +5936,13 @@ function buildEditing() {
   if (!EDIT) return;
   $id("entActions").hidden = false;
   $id("navAccounts").hidden = false;
+  if (LOCAL) {
+    // Kept in this browser until Save to workbook; what only the workbook can change stays there.
+    $id("entExport").hidden = true;
+    $id("navSettings").hidden = false;
+    document.querySelectorAll(".hosted-only").forEach((el) => { el.hidden = true; });
+    document.querySelectorAll(".local-only").forEach((el) => { el.hidden = false; });
+  }
   history = loadHistory();
   saveHistory();
   renderHistory();
@@ -5327,8 +5956,7 @@ function buildEditing() {
     const key = e.key.toLowerCase();
     if (key === "z" || key === "y") { e.preventDefault(); undoRedo(key === "z" && !e.shiftKey); }
   });
-  $id("acctCard").hidden = false;
-  renderAccountsCard();
+  if (LOCAL) $id("acctCard").hidden = true; else { $id("acctCard").hidden = false; renderAccountsCard(); }
 
   try {
     const flash = JSON.parse(sessionStorage.getItem(FLASH_KEY) || "null");
@@ -5492,7 +6120,7 @@ function renderAll() {
   if (closed && !state.showClosed) {
     const noun = hiddenNoun();
     bits.push(noun === "hidden account"
-      ? `${plural(closed, "account")} hidden (closed or never funded) — still counted in every total.${DATA.hosted && EDIT ? " One still open? Keep it showing in Settings." : ""}`
+      ? `${plural(closed, "account")} hidden (closed or never funded) — still counted in every total.${EDIT ? " One still open? Keep it showing in Settings." : ""}`
       : `${plural(closed, noun)} hidden — still counted in every total.`);
   }
   const ex = excludedHere();
@@ -5653,6 +6281,7 @@ buildGoals();
 if (DATA.hosted && EDIT) buildColorPicker();
 buildHouseholds();
 buildClosedAccounts();
+buildLocalBar();
 buildBranding();
 applyBrand();
 document.getElementById("goUpdate").addEventListener("click", () => setView("entries"));

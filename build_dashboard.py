@@ -20,6 +20,7 @@ import datetime
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import xlsx_reader
@@ -27,6 +28,7 @@ import xlsx_reader
 HERE = Path(__file__).resolve().parent
 WORKBOOK_NAME = "NetWorthTracker.xlsx"
 TEMPLATE = HERE / "template.html"
+MODEL = HERE / "model.js"   # the same rules in JavaScript, so the page can redo them after an edit
 OUTPUT = HERE / "NetWorth_Dashboard.html"
 
 LEGEND_ROW = 1
@@ -183,9 +185,63 @@ def order_categories(accounts):
     return ordered
 
 
+# Debt types file under Liabilities; asset types are categories themselves (as in model.js).
+DEBT_TYPES = ("Credit card", "Loan", "Mortgage")
+ACCOUNTS_SHEET = "Accounts"
+ACCOUNT_HEADINGS = {
+    "name": r"^(account|account name|name)$", "type": r"^(type|account type)$",
+    "institution": r"^(institution|bank)$", "last4": r"^last ?4( digits)?$", "notes": r"^notes?$",
+    "status": r"^status$", "creditLimit": r"^credit limit$", "interestRate": r"^(interest rate|apr)( ?\(%\))?$",
+}
+DETAIL_FIELDS = ("type", "institution", "last4", "notes", "status", "creditLimit", "interestRate")
+
+
+def category_for_type(account_type):
+    return LIABILITY_CATEGORY if account_type in DEBT_TYPES else account_type
+
+
+def account_details(sheets):
+    """The optional "Accounts" sheet: one row per account (matched by name) with
+    its type, institution, last 4 digits, notes, Open/Closed status, credit limit
+    and interest rate. Written by the dashboard's Save to workbook, or by hand."""
+    sheet = next((sh for sh in sheets[1:] if sh.name.strip().lower() == ACCOUNTS_SHEET.lower()), None)
+    if sheet is None:
+        return {}
+    head = [str(c.value).strip().lower() if c.value is not None else "" for c in sheet.row(1)]
+    col = {f: next((i + 1 for i, h in enumerate(head) if re.match(rx, h)), None) for f, rx in ACCOUNT_HEADINGS.items()}
+    if not col["name"]:
+        return {}
+    out = {}
+    for r in range(2, sheet.max_row + 1):
+        name = sheet.cell(r, col["name"]).value
+        if not isinstance(name, str) or not name.strip():
+            continue
+        d = {}
+        for f in DETAIL_FIELDS:
+            v = sheet.cell(r, col[f]).value if col[f] else None
+            if isinstance(v, str):
+                v = v.strip() or None
+            if f == "last4" and v is not None:
+                v = str(int(v)).zfill(4) if isinstance(v, (int, float)) else str(v)
+            elif f in ("creditLimit", "interestRate") and v is not None:
+                try:
+                    v = float(str(v).replace(",", "").replace("$", "").replace("%", ""))
+                except ValueError:
+                    v = None
+            elif f == "status" and v is not None:
+                v = str(v).lower() if str(v).lower() in ("open", "closed") else None
+            elif v is not None and not isinstance(v, str):
+                v = str(v)
+            d[f] = v
+        out[name.strip().lower()] = d
+    return out
+
+
 def extract(xlsx_path):
-    sheet = xlsx_reader.load(xlsx_path)[0]
+    sheets = xlsx_reader.load(xlsx_path)
+    sheet = sheets[0]
     owner_names, owner_by_fill = legend_owners(sheet)
+    details = account_details(sheets)
 
     columns = []
     for col, cell in enumerate(sheet.row(HEADER_ROW), start=1):
@@ -195,14 +251,22 @@ def extract(xlsx_path):
         if col == 1 or not name:
             continue
         raw_category = sheet.cell(CATEGORY_ROW, col).value
+        d = details.get(name.lower(), {})
+        typed = raw_category.strip() if isinstance(raw_category, str) and raw_category.strip() else None
         columns.append({
             "name": name,
             "col": col,
             "owner": owner_by_fill.get(cell.fill),
-            "rawCategory": raw_category.strip() if isinstance(raw_category, str) else None,
+            # Row 3 wins; otherwise the type from the Accounts sheet picks the category.
+            "rawCategory": typed or (category_for_type(d["type"]) if d.get("type") else None),
+            "typed": typed,
+            "status": d.get("status"),
+            "details": {f: d.get(f) for f in DETAIL_FIELDS},
         })
+    total_col = next((c for c, cell in enumerate(sheet.row(HEADER_ROW), start=1)
+                      if isinstance(cell.value, str) and cell.value.strip().lower() == "total"), None)
 
-    dates, rows = [], []
+    found = []
     for row in range(FIRST_DATA_ROW, sheet.max_row + 1):
         raw_date = sheet.cell(row, 1).value
         if not isinstance(raw_date, (datetime.datetime, datetime.date)):
@@ -210,8 +274,13 @@ def extract(xlsx_path):
         values = [sheet.cell(row, c["col"]).value for c in columns]
         if all(is_blank(v) or v == 0 for v in values):
             continue  # empty template row
-        dates.append(raw_date.strftime("%Y-%m-%d"))
-        rows.append(values)
+        values = [None if is_blank(v) or not isinstance(v, (int, float)) else v for v in values]
+        found.append((raw_date.strftime("%Y-%m-%d"), row, values))
+    # Date order, as the hosted version keeps it, so a row typed out of order still lands in place.
+    found.sort(key=lambda f: f[0])
+    dates = [f[0] for f in found]
+    rows = [f[2] for f in found]
+    sheet_rows = [f[1] for f in found]
 
     if not dates:
         raise SystemExit(f"No dated rows found in {xlsx_path}")
@@ -222,6 +291,13 @@ def extract(xlsx_path):
         series, carried = carry_forward(raw)
         first_entry = next((k for k, v in enumerate(raw) if not is_blank(v)), None)
         closed, last_held, unfunded = closed_state(series, first_entry)
+        auto = ("unfunded" if unfunded else "closed") if closed else None
+        # An Open/Closed status (the Accounts sheet) wins over the rules, as in model.js.
+        if c["status"] == "open":
+            closed, unfunded, last_held = False, False, None
+        elif c["status"] == "closed":
+            held = [k for k, v in enumerate(series) if abs(v) > ZERO]
+            closed, unfunded, last_held = True, False, (held[-1] if held else None)
         accounts.append({
             "name": c["name"],
             "owner": c["owner"],
@@ -229,13 +305,14 @@ def extract(xlsx_path):
             "isLiability": is_liability(c["name"], series, c["rawCategory"]),
             "closed": closed,
             "unfunded": unfunded,
-            "auto": ("unfunded" if unfunded else "closed") if closed else None,
+            "auto": auto,
             "lastHeld": dates[last_held] if last_held is not None else None,
             "series": series,
             "carried": carried,
         })
 
     owners = [{"name": n, "accounts": sum(1 for a in accounts if a["owner"] == n)} for n in owner_names]
+    owner_id = {n: 1 + i for i, n in enumerate(owner_names)}
 
     return {
         "source": Path(xlsx_path).name,
@@ -245,6 +322,33 @@ def extract(xlsx_path):
         "owners": owners,
         "categoryOrder": order_categories(accounts),
         "closedRun": CLOSED_RUN,
+        # Local editing: what the page needs to redo the rules after an edit (tracker),
+        # ids for the editing UI (edit), and where each value sits for Save to workbook (sheet).
+        "local": True,
+        "builtAt": int(time.time() * 1000),
+        "tracker": {
+            "owners": owner_names,
+            "accounts": [{"name": c["name"], "owner": c["owner"], "rawCategory": c["rawCategory"], "status": c["status"]} for c in columns],
+            "dates": dates,
+            "rows": rows,
+        },
+        "edit": {
+            # Ids are where things sit in the sheet (row of a snapshot, column of an account),
+            # so an edit kept in the browser still points at the same cell after a rebuild.
+            "snapshotIds": sheet_rows,
+            "accounts": [{"id": c["col"], "ownerId": owner_id.get(c["owner"]), "rawCategory": c["rawCategory"], **c["details"]}
+                         for i, c in enumerate(columns)],
+            "owners": [{"id": owner_id[n], "name": n} for n in owner_names],
+        },
+        "sheet": {
+            "name": sheet.name,
+            "headerRow": HEADER_ROW,
+            "rows": sheet_rows,
+            "cols": [c["col"] for c in columns],
+            "categories": [c["typed"] for c in columns],
+            "totalCol": total_col,
+            "lastRow": sheet.max_row,
+        },
     }
 
 
@@ -253,14 +357,16 @@ def is_stale(xlsx_path):
     if not OUTPUT.exists():
         return True
     built = OUTPUT.stat().st_mtime
-    return any(p.exists() and p.stat().st_mtime > built for p in (xlsx_path, TEMPLATE, Path(__file__)))
+    return any(p.exists() and p.stat().st_mtime > built for p in (xlsx_path, TEMPLATE, MODEL, Path(__file__)))
 
 
 def build(xlsx_path):
     data = extract(xlsx_path)
+    # model.js is an ES module; the page gets it as a plain script, inside a function so its names stay private.
+    model = re.sub(r"^export ", "", MODEL.read_text(encoding="utf-8"), flags=re.M)
     html = TEMPLATE.read_text(encoding="utf-8").replace(
         "/*__DATA__*/null", json.dumps(data, separators=(",", ":"))
-    )
+    ).replace("/*__MODEL__*/", model)
     OUTPUT.write_text(html, encoding="utf-8")
     return data
 
