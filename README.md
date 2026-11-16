@@ -167,6 +167,30 @@ last payment, with a forecast to the next one. **Export summary** downloads the
 monthly figures and the breakdown as a spreadsheet. Transfers between accounts
 blur these figures, and the tab says so.
 
+**A Transactions tab (beta)**
+
+Add a bank or card statement as **CSV** or **OFX/QFX**. The browser reads it;
+only each row's date, description and amount are kept, and long digit runs in
+descriptions (card or account numbers) are cut to their last 4. CSV columns are
+mapped once per layout and remembered. The account is picked from the
+statement's last 4 digits or bank when they match one of yours, and every row
+is shown before it's added. Adding the same statement again skips rows already
+there (same account, date, amount and description). The same amount leaving
+one account and arriving in another within a few days is matched as an
+internal transfer and counted as neither income nor spending. Categories per
+row, rules ("description contains *Whole Foods* → Groceries"), filters, search,
+**Export CSV**, a check of each statement's ending balance against the snapshot
+that day, and Delete per statement. PDF statements aren't read yet.
+
+Transactions are saved to the workbook with **Save to workbook**, on a
+**Transactions** sheet (one row each: date, account, description, amount,
+category, kind, statement) and a small **Statements** sheet (one row per file
+added). Rules and remembered CSV layouts are kept in this browser, like goals.
+
+**Built but not thoroughly tested:** so far it has only been tried with made-up
+statements like the one in `test/statements/`, so check each statement's
+preview and compare totals with your bank's. The tab says so too.
+
 **A Goals tab**
 
 Savings goals (held in one or more accounts, each with its own amount set aside
@@ -256,14 +280,19 @@ per account, matched by name, with any of these headings in row 1:
 | `Status` | `Open` or `Closed`. Blank: decided by the balances (see below) |
 | `Credit limit`, `Interest rate` | For cards; the rate for cash and loans too |
 
+The **Transactions** and **Statements** sheets work the same way: written by
+Save to workbook from the Transactions tab, and read back when the dashboard is
+built.
+
 You don't have to make it yourself: the dashboard writes it when you save
 account details (see below).
 
 ### Editing in the dashboard
 
 **Update balances** adds, changes and deletes snapshots, **Accounts** edits each
-account's details, and **Settings → Closed and hidden accounts** keeps an
-account showing that the rules would hide. Changes show at once and stay in
+account's details, **Transactions** adds statements and their categories, and
+**Settings → Closed and hidden accounts** keeps an account showing that the
+rules would hide. Changes show at once and stay in
 this browser until you press **Save to workbook** in the bar at the top:
 
 - **Close the workbook in Excel first.**

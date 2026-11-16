@@ -237,6 +237,65 @@ def account_details(sheets):
     return out
 
 
+def sheet_table(sheets, name):
+    """A sheet after the first, by name: [{heading: value}] for each row with something in it."""
+    sheet = next((sh for sh in sheets[1:] if sh.name.strip().lower() == name.lower()), None)
+    if sheet is None:
+        return None
+    head = [str(c.value).strip().lower() if c.value is not None else "" for c in sheet.row(1)]
+    out = []
+    for r in range(2, sheet.max_row + 1):
+        row = {h: sheet.cell(r, k + 1).value for k, h in enumerate(head) if h}
+        if any(v is not None and v != "" for v in row.values()):
+            row["_row"] = r
+            out.append(row)
+    return out
+
+
+def iso_date(v):
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", v.strip()):
+        return v.strip()
+    return None
+
+
+def statements_and_transactions(sheets, account_id):
+    """The optional Statements and Transactions sheets, written by the Transactions
+    tab's Save to workbook: uploaded statements, and one row per transaction
+    (amounts in dollars here, kept as cents by the page)."""
+    st_rows, tx_rows = sheet_table(sheets, "Statements"), sheet_table(sheets, "Transactions")
+    if st_rows is None and tx_rows is None:
+        return {"statements": [], "transactions": []}
+    statements = []
+    for r in st_rows or []:
+        sid, acct = r.get("statement"), r.get("account")
+        if not isinstance(sid, (int, float)) or not isinstance(acct, str) or acct.strip().lower() not in account_id:
+            continue
+        num = lambda v: float(v) if isinstance(v, (int, float)) else None
+        statements.append({
+            "id": int(sid), "account_id": account_id[acct.strip().lower()], "account_name": acct.strip(),
+            "source": str(r.get("file") or "Statement"), "format": str(r.get("format") or "csv").lower(),
+            "first_date": iso_date(r.get("first date")), "last_date": iso_date(r.get("last date")),
+            "ending_balance": num(r.get("ending balance")), "ending_date": iso_date(r.get("ending date")),
+            "uploaded_at": str(r.get("uploaded") or "") or iso_date(r.get("first date")) or "1970-01-01", "uploaded_by": None,
+        })
+    known = {st["id"] for st in statements}
+    transactions = []
+    for r in tx_rows or []:
+        date, amount, sid = iso_date(r.get("date")), r.get("amount"), r.get("statement")
+        if date is None or not isinstance(amount, (int, float)) or not isinstance(sid, (int, float)) or int(sid) not in known:
+            continue
+        kind = str(r.get("kind") or "").strip().lower()
+        transactions.append({
+            "id": r["_row"], "statement_id": int(sid), "date": date,
+            "description": str(r.get("description") or "(no description)"), "amount": int(round(amount * 100)),
+            "category": (str(r.get("category")).strip() or None) if r.get("category") is not None else None,
+            "kind": kind if kind in ("transfer", "normal") else None,
+        })
+    return {"statements": statements, "transactions": transactions}
+
+
 def extract(xlsx_path):
     sheets = xlsx_reader.load(xlsx_path)
     sheet = sheets[0]
@@ -340,6 +399,7 @@ def extract(xlsx_path):
                          for i, c in enumerate(columns)],
             "owners": [{"id": owner_id[n], "name": n} for n in owner_names],
         },
+        "txStore": statements_and_transactions(sheets, {c["name"].lower(): c["col"] for c in columns}),
         "sheet": {
             "name": sheet.name,
             "headerRow": HEADER_ROW,

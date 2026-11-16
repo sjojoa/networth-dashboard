@@ -1246,7 +1246,7 @@
       <div>
         <h3>Only what's read is kept</h3>
         <p>Your browser reads the statement; the file itself is never uploaded or stored. Only each row's date, description and amount
-          are saved, for this household, and long numbers in descriptions (card or account numbers) are cut to their last 4 digits.</p>
+          are <span id="txKeptWhere">saved, for this household,</span> and long numbers in descriptions (card or account numbers) are cut to their last 4 digits.</p>
       </div>
     </div>
   </div>
@@ -1442,7 +1442,7 @@
    points at the same cell after a rebuild. */
 const MODEL = (() => {
 /*__MODEL__*/
-  return typeof buildData === "function" ? { buildData, categoryForType, typeOf, ASSET_TYPES, DEBT_TYPES } : null;
+  return typeof buildData === "function" ? { buildData, categoryForType, typeOf, ASSET_TYPES, DEBT_TYPES, TX_CATEGORIES } : null;
 })();
 let LOCAL = null;   // { raw, store: { ops, savedAt, nextId }, state, dropped }
 
@@ -1462,7 +1462,26 @@ function localState(raw) {
     owners: e.owners.map((o) => ({ ...o })),
     accounts: t.accounts.map((a, i) => ({ ...e.accounts[i], name: a.name, owner: a.owner, rawCategory: a.rawCategory, status: a.status })),
     snaps: t.dates.map((d, k) => ({ id: e.snapshotIds[k], date: d, values: t.rows[k].slice() })),
+    statements: ((raw.txStore && raw.txStore.statements) || []).map((x) => ({ ...x })),
+    tx: ((raw.txStore && raw.txStore.transactions) || []).map((x) => ({ ...x })),
   };
+}
+/* Statements and transactions, as the server keeps them (src/api.js, src/db.js). Own copies of the
+   masking and category checks: these run while the page is still starting, before its helpers exist. */
+const localMask = (text) => text.replace(/\d(?:[ -]?\d){7,}/g, (run) => "••" + run.replace(/\D/g, "").slice(-4));
+const localCategory = (v, where = "") => {
+  if (v === null || v === undefined || v === "") return null;
+  if (!MODEL.TX_CATEGORIES.includes(v)) throw new Error(`${where}Pick one of the categories offered.`);
+  return v;
+};
+function applyRulesTo(S, rules) {
+  let n = 0;
+  S.tx.forEach((t) => {
+    if (t.category !== null || (t.kind !== null && t.kind !== "normal")) return;
+    const r = rules.find((x) => t.description.toLowerCase().includes(x.contains.toLowerCase()));
+    if (r) { t.category = r.category; n++; }
+  });
+  return n;
 }
 
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -1525,6 +1544,63 @@ function applyOp(S, op) {
     S.snaps.splice(k, 1);
     return {};
   }
+  if (method === "POST" && path === "/api/statements") {
+    const a = S.accounts.find((x) => x.id === body.accountId);
+    if (!a) throw new Error("Pick the account this statement is for.");
+    if (!["csv", "ofx", "pdf"].includes(body.format)) throw new Error("The statement must be CSV, OFX/QFX or PDF.");
+    if (!Array.isArray(body.rows) || !body.rows.length) throw new Error("The statement has no transactions to save.");
+    if (body.rows.length > 5000) throw new Error("A statement can have at most 5,000 transactions.");
+    if (S.tx.length + body.rows.length > 50000) throw new Error("That would be more than 50,000 transactions. Delete an old statement first.");
+    const rows = body.rows.map((r, k) => {
+      const where = `Row ${k + 1}: `;
+      if (!Array.isArray(r) || r.length !== 4) throw new Error(`${where}couldn't be read.`);
+      const [date, description, amount, category] = r;
+      if (!localIsDate(date)) throw new Error(`${where}the date isn't valid.`);
+      if (typeof description !== "string") throw new Error(`${where}the description isn't text.`);
+      if (!Number.isInteger(amount) || Math.abs(amount) >= 1e13) throw new Error(`${where}the amount must be a whole number of cents.`);
+      return { date, description: localMask(description.replace(/\s+/g, " ").trim()).slice(0, 200) || "(no description)", amount, category: localCategory(category, where) };
+    });
+    const endingBalance = localNumber(body.endingBalance, "The ending balance", -1e13, 1e13);
+    const endingDate = body.endingDate || null;
+    if (endingDate !== null && !localIsDate(endingDate)) throw new Error("The statement's ending date isn't valid.");
+    // Rows already stored for this account (another statement, same date, amount and description) are skipped.
+    const ofAcct = new Set(S.statements.filter((x) => x.account_id === a.id).map((x) => x.id));
+    const seen = new Set(S.tx.filter((t) => ofAcct.has(t.statement_id)).map((t) => `${t.date}|${t.amount}|${t.description}`));
+    const fresh = rows.filter((r) => !seen.has(`${r.date}|${r.amount}|${r.description}`));
+    if (!fresh.length) return { id: null, added: 0, skipped: rows.length };
+    const dates = rows.map((r) => r.date).sort();
+    S.statements.push({ id: op.id, account_id: a.id, account_name: a.name, source: localText(body.source || "Statement", "The file name", 200),
+      format: body.format, first_date: dates[0], last_date: dates[dates.length - 1], ending_balance: endingBalance, ending_date: endingDate,
+      uploaded_at: op.at, uploaded_by: null });
+    fresh.forEach((r, k) => S.tx.push({ id: op.txBase + k, statement_id: op.id, date: r.date, description: r.description, amount: r.amount, category: r.category, kind: null }));
+    return { id: op.id, added: fresh.length, skipped: rows.length - fresh.length };
+  }
+  if ((m = path.match(/^\/api\/statements\/(\d+)$/)) && (method === "PUT" || method === "DELETE")) {
+    const st = S.statements.find((x) => x.id === +m[1]);
+    if (!st) throw new Error("That statement doesn't exist any more. Reload and try again.");
+    if (method === "DELETE") { S.statements = S.statements.filter((x) => x !== st); S.tx = S.tx.filter((t) => t.statement_id !== st.id); return {}; }
+    const a = S.accounts.find((x) => x.id === body.accountId);
+    if (!a) throw new Error("Pick the account this statement is for.");
+    st.account_id = a.id; st.account_name = a.name;
+    return {};
+  }
+  if (method === "PUT" && path === "/api/transactions") {
+    const changes = body.changes;
+    if (!Array.isArray(changes) || !changes.length || changes.length > 1000) throw new Error("Expected 1–1,000 changes.");
+    const byId = new Map(S.tx.map((t) => [t.id, t]));
+    const clean = changes.map((c) => {
+      if (!Array.isArray(c) || c.length !== 3) throw new Error("Each change needs a transaction, a category and a kind.");
+      const kind = c[2] === null || c[2] === undefined ? null : c[2];
+      if (kind !== null && kind !== "transfer" && kind !== "normal") throw new Error("Kind must be transfer, normal, or automatic.");
+      if (!byId.has(c[0])) throw new Error("A transaction doesn't exist any more. Reload and try again.");
+      return [byId.get(c[0]), kind === "transfer" ? null : localCategory(c[1]), kind];
+    });
+    clean.forEach(([t, category, kind]) => { t.category = category; t.kind = kind; });
+    return {};
+  }
+  if (method === "PUT" && path === "/api/transactions/rules") {
+    return { applied: applyRulesTo(S, op.rules || []) };
+  }
   if (method === "PUT" && path === "/api/accounts/status") {
     const changes = body.changes;
     if (!Array.isArray(changes) || !changes.length) throw new Error("Expected a list of account statuses.");
@@ -1570,6 +1646,8 @@ function applyOp(S, op) {
 const stateKey = (S) => ({
   accounts: S.accounts.map((a) => [a.name, a.owner, a.rawCategory, a.status, a.type, a.institution, a.last4, a.notes, a.creditLimit, a.interestRate]),
   snaps: S.snaps.map((x) => [x.date, x.values]).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)),
+  statements: S.statements.map((x) => [x.account_name, x.source, x.first_date, x.last_date, x.ending_balance, x.ending_date]).sort(),
+  tx: S.tx.map((t) => [t.date, t.description, t.amount, t.category, t.kind]).sort(),
 });
 
 /** DATA as the hosted page would see it, from the state: the rules redone by model.js. */
@@ -1616,11 +1694,19 @@ function withLocalEdits(raw) {
     try { applyOp(state, op); kept.push(op); } catch (e) { LOCAL.dropped++; }
   }
   if (LOCAL.dropped) { store.ops = kept; writeLocal(raw, store); }
-  return { ...localData(raw, state), spendingBudget: LOCAL.settings.spendingBudget, goals: LOCAL.settings.goals };
+  return { ...localData(raw, state), spendingBudget: LOCAL.settings.spendingBudget, goals: LOCAL.settings.goals,
+           tx: { categories: MODEL.TX_CATEGORIES, rules: LOCAL.settings.rules, mappings: LOCAL.settings.mappings } };
 }
 
 /** The local stand-in for the server: checks and keeps the edit, or throws with what to show. */
 async function localApi(method, path, body) {
+  if (method === "GET" && path === "/api/transactions") {
+    const S = LOCAL.state, count = (id) => S.tx.filter((t) => t.statement_id === id).length;
+    return {
+      statements: S.statements.map((x) => ({ ...x, count: count(x.id) })).sort((x, y) => (x.uploaded_at < y.uploaded_at ? 1 : x.uploaded_at > y.uploaded_at ? -1 : y.id - x.id)),
+      transactions: S.tx.slice().sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : y.id - x.id)),
+    };
+  }
   const settled = settingsApi(method, path, body || {});
   if (settled !== undefined) return settled;
   if (LOCAL.store.savedAt) {
@@ -1628,6 +1714,32 @@ async function localApi(method, path, body) {
   }
   const op = { method, path, body: body === undefined ? null : JSON.parse(JSON.stringify(body)) };
   if (method === "POST" && path === "/api/snapshots") op.id = LOCAL.store.nextId = (LOCAL.store.nextId || 1000000) + 1;
+  if (method === "POST" && path === "/api/statements") {
+    // Ids that won't meet the workbook's: statements after the highest there, transactions after 10,000,000.
+    const top = Math.max(0, ...LOCAL.state.statements.map((x) => x.id));
+    op.id = Math.max(top, LOCAL.store.nextStatement || 0) + 1; LOCAL.store.nextStatement = op.id;
+    op.txBase = LOCAL.store.nextTx = LOCAL.state.tx.reduce((n, t) => Math.max(n, t.id + 1), LOCAL.store.nextTx || 10000000);
+    op.at = new Date().toISOString();
+  }
+  if (method === "PUT" && path === "/api/transactions/rules") {
+    // The rules are a setting (kept at once); filling in uncategorized rows with them is a change to save.
+    if (!Array.isArray(body.rules) || body.rules.length > 200) throw new Error("Expected a list of up to 200 rules.");
+    op.rules = body.rules.map((r, k) => {
+      const contains = localText(r && r.contains, `Rule ${k + 1}'s text`, 60);
+      if (contains.length < 2) throw new Error(`Rule ${k + 1}'s text needs at least 2 characters.`);
+      const category = localCategory(r.category, `Rule ${k + 1}: `);
+      if (category === null) throw new Error(`Rule ${k + 1} needs a category.`);
+      return { contains, category };
+    });
+    LOCAL.settings.rules = op.rules;
+    writeSettings(LOCAL.raw, LOCAL.settings);
+    const probe = { tx: LOCAL.state.tx.map((t) => ({ ...t })) };
+    if (!applyRulesTo(probe, op.rules)) return { applied: 0 };
+  }
+  if (method === "POST" && path === "/api/statements" && body && body.mapping && typeof body.mapping.key === "string") {
+    LOCAL.settings.mappings[body.mapping.key.slice(0, 500)] = body.mapping.value;
+    writeSettings(LOCAL.raw, LOCAL.settings);
+  }
   const renamed = (m) => (m = path.match(/^\/api\/accounts\/(\d+)$/)) && method === "PUT" ? LOCAL.state.accounts.find((a) => a.id === +m[1]) : null;
   const acct = renamed(), before = acct && acct.name;
   const out = applyOp(LOCAL.state, op);
@@ -1637,6 +1749,8 @@ async function localApi(method, path, body) {
     throw new Error("This browser wouldn't keep the change (its storage is full or blocked), so nothing was changed.");
   }
   if (acct && acct.name !== before) renameInLocalSettings(before, acct.name);
+  if (out && out.id === null && path === "/api/statements") LOCAL.store.ops.pop(), writeLocal(LOCAL.raw, LOCAL.store);   // nothing new: nothing to save
+  if (typeof renderLocalBar === "function" && document.getElementById("localBar")) { renderLocalBar(); renderKept(); }
   return out || {};
 }
 
@@ -1646,9 +1760,10 @@ async function localApi(method, path, body) {
    save. Settings → Kept in this browser backs them up to a file and restores them. */
 const settingsKey = (raw) => `nw-local-settings:${raw.source}`;
 function readSettings(raw) {
-  try { const s = JSON.parse(localStorage.getItem(settingsKey(raw)) || "null"); if (s && typeof s === "object") return { spendingBudget: s.spendingBudget || {}, goals: Array.isArray(s.goals) ? s.goals : [] }; }
+  try { const s = JSON.parse(localStorage.getItem(settingsKey(raw)) || "null"); if (s && typeof s === "object") return { spendingBudget: s.spendingBudget || {}, goals: Array.isArray(s.goals) ? s.goals : [],
+    rules: Array.isArray(s.rules) ? s.rules : [], mappings: s.mappings && typeof s.mappings === "object" ? s.mappings : {} }; }
   catch (e) { /* none yet */ }
-  return { spendingBudget: {}, goals: [] };
+  return { spendingBudget: {}, goals: [], rules: [], mappings: {} };
 }
 function writeSettings(raw, s) {
   try { localStorage.setItem(settingsKey(raw), JSON.stringify(s)); return true; } catch (e) { return false; }
@@ -2955,7 +3070,7 @@ const acctSub = (a) => {
 };
 
 function renderTransactions() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
   if (!TX.loaded) {
     if (!TX.loading && !TX.error) loadTransactions();
     $id("txKpis").innerHTML = ""; $id("txTable").innerHTML = ""; $id("txPager").innerHTML = ""; $id("stList").innerHTML = "";
@@ -3330,7 +3445,8 @@ function txCsv(rows) {
 }
 
 function buildTransactions() {
-  if (!(DATA.hosted && EDIT)) return;
+  if (!EDIT) return;
+  if (LOCAL) $id("txKeptWhere").textContent = "kept in this browser until you save them to the workbook's Transactions sheet,";
   $id("navTransactions").hidden = false;
   const rerender = () => { TX.page = 0; renderTransactions(); };
   $id("txSearch").addEventListener("input", (e) => { TX.search = e.target.value; rerender(); });
@@ -4644,7 +4760,7 @@ const VIEWS = {
 };
 const viewFromHash = () => Object.keys(VIEWS).find((v) => VIEWS[v].hash && VIEWS[v].hash === location.hash) || "dash";
 function setView(view) {
-  if (!VIEWS[view] || (view === "settings" && !DATA.household && !LOCAL) || (view === "accounts" && !EDIT) || (view === "transactions" && !(DATA.hosted && DATA.edit))) view = "dash";
+  if (!VIEWS[view] || (view === "settings" && !DATA.household && !LOCAL) || (view === "accounts" && !EDIT) || (view === "transactions" && !EDIT)) view = "dash";
   state.view = view;
   Object.keys(VIEWS).forEach((v) => { document.getElementById(v + "View").hidden = v !== view; });
   document.querySelectorAll(".nav-item[data-view]").forEach((b) => {
@@ -4867,19 +4983,31 @@ function sheetCells(doc, strings) {
   return { root, rows, row, cell, value, clear, setNumber, setText, setFormula };
 }
 
-/** The Accounts sheet: one row per account with its details, in the workbook's column order. */
-function accountsSheetXml(S) {
-  const head = ["Name", "Type", "Institution", "Last 4", "Notes", "Status", "Credit limit", "Interest rate"];
-  const txt = (r, c, s) => (s === null || s === undefined || s === "" ? "" : `<c r="${colName(c)}${r}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(s)}</t></is></c>`);
-  const num = (r, c, v) => (typeof v === "number" ? `<c r="${colName(c)}${r}"><v>${v}</v></c>` : "");
-  const rows = [`<row r="1">${head.map((h, k) => txt(1, k + 1, h)).join("")}</row>`].concat(S.accounts.map((a, k) => {
-    const r = k + 2;
-    return `<row r="${r}">${txt(r, 1, a.name)}${txt(r, 2, a.type)}${txt(r, 3, a.institution)}${txt(r, 4, a.last4)}${txt(r, 5, a.notes)}`
-      + `${txt(r, 6, a.status === "open" ? "Open" : a.status === "closed" ? "Closed" : "")}${num(r, 7, a.creditLimit)}${num(r, 8, a.interestRate)}</row>`;
-  }));
-  return XML_HEAD + `<worksheet xmlns="${XML_NS.main}"><cols><col min="1" max="1" width="24" customWidth="1"/><col min="2" max="8" width="16" customWidth="1"/></cols>`
-    + `<sheetData>${rows.join("")}</sheetData></worksheet>`;
+/** A plain sheet: headings in row 1, then one row per item; strings as text, numbers as numbers, blanks left out. */
+function tableSheetXml(head, rows, widths) {
+  const cell = (r, c, v) => (v === null || v === undefined || v === "" ? ""
+    : typeof v === "number" ? `<c r="${colName(c)}${r}"><v>${v}</v></c>`
+    : `<c r="${colName(c)}${r}" t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`);
+  const body = [head].concat(rows).map((row, k) => `<row r="${k + 1}">${row.map((v, c) => cell(k + 1, c + 1, v)).join("")}</row>`).join("");
+  return XML_HEAD + `<worksheet xmlns="${XML_NS.main}"><cols>${widths.map((w, k) => `<col min="${k + 1}" max="${k + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>`
+    + `<sheetData>${body}</sheetData></worksheet>`;
 }
+/** The Accounts sheet: each account's details, in the workbook's column order. */
+const bookAccountsXml = (S) => tableSheetXml(["Name", "Type", "Institution", "Last 4", "Notes", "Status", "Credit limit", "Interest rate"],
+  S.accounts.map((a) => [a.name, a.type, a.institution, a.last4, a.notes, a.status === "open" ? "Open" : a.status === "closed" ? "Closed" : "", a.creditLimit, a.interestRate]),
+  [24, 16, 18, 10, 30, 10, 12, 12]);
+/** The Statements sheet: one row per uploaded statement. */
+const bookStatementsXml = (S) => tableSheetXml(["Statement", "Account", "File", "Format", "First date", "Last date", "Ending balance", "Ending date", "Uploaded"],
+  S.statements.map((x) => [x.id, x.account_name, x.source, x.format, x.first_date, x.last_date, x.ending_balance, x.ending_date, x.uploaded_at]),
+  [10, 22, 30, 8, 12, 12, 14, 12, 22]);
+/** The Transactions sheet: newest first, amounts in dollars (money in positive, out negative). */
+const bookTransactionsXml = (S) => {
+  const acct = new Map(S.statements.map((x) => [x.id, x.account_name]));
+  return tableSheetXml(["Date", "Account", "Description", "Amount", "Category", "Kind", "Statement"],
+    S.tx.slice().sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : x.id - y.id))
+      .map((t) => [t.date, acct.get(t.statement_id) || "", t.description, Math.round(t.amount) / 100, t.category, t.kind === "transfer" ? "Transfer" : t.kind === "normal" ? "Normal" : "", t.statement_id]),
+    [12, 22, 44, 12, 20, 10, 10]);
+};
 const hasDetails = (a) => ["type", "institution", "last4", "notes", "status", "creditLimit", "interestRate"].some((f) => a[f] !== null && a[f] !== undefined);
 
 /** The workbook's bytes with this browser's edits written in. Throws if it no longer matches the build. */
@@ -4977,26 +5105,30 @@ async function patchWorkbook(bytes) {
   if (dim && added.length) dim.setAttribute("ref", dim.getAttribute("ref").replace(/(\d+)$/, (m) => String(Math.max(+m, next))));
   changed.set(mainPart, xmlOut(doc));
 
-  // The Accounts sheet: replaced if there is one, added if any account has details.
-  const accountsEl = sheetEls.slice(1).find((el) => el.getAttribute("name").trim().toLowerCase() === "accounts");
-  if (accountsEl) changed.set(sheetPart(accountsEl), accountsSheetXml(S));
-  else if (S.accounts.some(hasDetails)) {
-    const part = "xl/worksheets/nw-accounts.xml", id = "rIdNwAccounts";
+  // The Accounts, Statements and Transactions sheets: replaced if they're there, added when there's something to put in them.
+  let types = null;
+  const tables = [["Accounts", bookAccountsXml, S.accounts.some(hasDetails)], ["Statements", bookStatementsXml, S.statements.length > 0],
+                  ["Transactions", bookTransactionsXml, S.statements.length > 0]];
+  for (const [name, xml, wanted] of tables) {
+    const el0 = kids(sheetsEl, "sheet").slice(1).find((el) => el.getAttribute("name").trim().toLowerCase() === name.toLowerCase());
+    if (el0) { changed.set(sheetPart(el0), xml(S)); continue; }
+    if (!wanted) continue;
+    const part = `xl/worksheets/nw-${name.toLowerCase()}.xml`, id = `rIdNw${name}`;
     const el = wb.createElementNS(XML_NS.main, (wb.documentElement.prefix ? wb.documentElement.prefix + ":" : "") + "sheet");
-    el.setAttribute("name", "Accounts");
-    el.setAttribute("sheetId", String(Math.max(...sheetEls.map((x) => +x.getAttribute("sheetId") || 0)) + 1));
+    el.setAttribute("name", name);
+    el.setAttribute("sheetId", String(Math.max(...kids(sheetsEl, "sheet").map((x) => +x.getAttribute("sheetId") || 0)) + 1));
     el.setAttributeNS(XML_NS.rel, "r:id", id);
     sheetsEl.appendChild(el);
     const rel = rels.createElementNS(XML_NS.pkg, "Relationship");
-    rel.setAttribute("Id", id); rel.setAttribute("Type", XML_NS.rel + "/worksheet"); rel.setAttribute("Target", "worksheets/nw-accounts.xml");
+    rel.setAttribute("Id", id); rel.setAttribute("Type", XML_NS.rel + "/worksheet"); rel.setAttribute("Target", `worksheets/nw-${name.toLowerCase()}.xml`);
     rels.documentElement.appendChild(rel);
-    const types = parseXml(await text("[Content_Types].xml") || "", "contents");
+    types = types || parseXml(await text("[Content_Types].xml") || "", "contents");
     const ov = types.createElementNS(XML_NS.types, "Override");
     ov.setAttribute("PartName", "/" + part); ov.setAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml");
     types.documentElement.appendChild(ov);
-    changed.set("[Content_Types].xml", xmlOut(types));
-    changed.set(part, accountsSheetXml(S));
+    changed.set(part, xml(S));
   }
+  if (types) changed.set("[Content_Types].xml", xmlOut(types));
 
   // Excel recalculates every formula when it opens the file (the Total column included).
   if (byName.has("xl/calcChain.xml")) {

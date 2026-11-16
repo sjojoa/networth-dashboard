@@ -62,6 +62,15 @@ RUN = r"""
       ];
       out.results = [];
       for (const [m, p, b] of calls) { try { out.results.push(await api(m, p, b)); } catch (e) { out.results.push("ERR " + e.message); } }
+      // Transactions: a made-up statement, the same one again (all skipped), a rule, one change by hand.
+      const c = parseCsv(window.__ST), got = csvRows(c.slice(3), guessMapping(c[2]), 3);
+      const upload = { accountId: ids[0], source: "demo-checking-4821.csv", format: "csv", endingBalance: got.endingBalance, endingDate: got.endingDate,
+        mapping: { key: "demo", value: guessMapping(c[2]) }, rows: got.rows.map((r) => [r.date, r.description, r.cents, null]) };
+      out.tx = { first: await api("POST", "/api/statements", upload), again: await api("POST", "/api/statements", upload) };
+      out.tx.rules = await api("PUT", "/api/transactions/rules", { rules: [{ contains: "payroll", category: "Income" }] });
+      const listed = await api("GET", "/api/transactions");
+      await api("PUT", "/api/transactions", { changes: [[listed.transactions[0].id, "Groceries", null]] });
+      out.tx.listed = listed.transactions.length;
       out.refused = [];
       for (const [m, p, b] of [["POST", "/api/snapshots", { date: "2026-08-28", balances: [[ids[0], 1]] }],
                                ["POST", "/api/snapshots", { date: "2026-02-30", balances: [[ids[0], 1]] }],
@@ -81,6 +90,9 @@ RUN = r"""
                     card: DATA.accounts[14].name, cardDetails: EDIT.accounts[14], old401: [DATA.accounts[8].name, DATA.accounts[8].closed, DATA.accounts[8].auto],
                     checkingLast: DATA.accounts[0].series[DATA.accounts.length ? DATA.dates.length - 2 : 0] };
       out.bar = $id("localBar").hidden ? null : $id("localBarText").textContent;
+      const tl = await api("GET", "/api/transactions");
+      out.txAfter = { statements: tl.statements.map((x) => [x.source, x.count]), cats: tl.transactions.map((t) => t.category), rules: DATA.tx.rules, maps: Object.keys(DATA.tx.mappings) };
+      out.expectTx = tl;
       out.settings = { budget: DATA.spendingBudget, goals: DATA.goals.map((g) => [g.name, g.account || (g.accounts || []).map((h) => h.name + " " + h.amount).join()]) };
       setView("goals"); await tick(30);
       out.goalsView = { view: state.view, nav: !$id("navGoals").hidden, cards: [...document.querySelectorAll(".goal-card h3")].map((h) => h.textContent), localNote: !$id("goalsLocal").hidden };
@@ -124,7 +136,7 @@ def main():
                 data = data.replace(b"<t>Checking</t>", b"<t>Everyday checking</t>", 1)
             zout.writestr(item, data)
     book2 = base64.b64encode(buf.getvalue()).decode()
-    html = html.replace("<head>", "<head>" + PROBE, 1).replace("</body>", f"<script>window.__BOOK = {json.dumps(book64)}; window.__BOOK2 = {json.dumps(book2)};</script>" + RUN + "</body>", 1)
+    html = html.replace("<head>", "<head>" + PROBE, 1).replace("</body>", f"<script>window.__BOOK = {json.dumps(book64)}; window.__BOOK2 = {json.dumps(book2)}; window.__ST = {json.dumps((ROOT / 'test/statements/demo-checking-4821.csv').read_text())};</script>" + RUN + "</body>", 1)
     page = tmp / "probe.html"
     page.write_text(html, encoding="utf-8")
     profile = tmp / "profile"
@@ -159,6 +171,10 @@ def main():
     print("card details:", out["after"]["cardDetails"])
     print("bar:", out["bar"])
     print("stale workbook:", out["stale"])
+    print("transactions:", first["tx"])
+    print("transactions after reload:", out["txAfter"])
+    if first["tx"]["again"].get("id") is not None or first["tx"]["again"].get("added") != 0:
+        fails.append(("a repeated statement wasn't skipped", first["tx"]["again"]))
     print("settings:", out["settings"])
     print("goals view:", out["goalsView"])
     print("kept note:", out["kept"])
@@ -172,6 +188,12 @@ def main():
     saved = tmp / "saved.xlsx"
     saved.write_bytes(base64.b64decode(out["patched"]))
     got = build_dashboard.extract(saved)
+    saved_tx = got["txStore"]
+    want = sorted((t["date"], t["description"], t["amount"], t["category"]) for t in out["expectTx"]["transactions"])
+    have = sorted((t["date"], t["description"], t["amount"], t["category"]) for t in saved_tx["transactions"])
+    print("saved transactions:", len(have), "of", len(want), "| statements:", [(x["source"], x["account_name"]) for x in saved_tx["statements"]])
+    if want != have:
+        fails.append(("saved transactions differ", [x for x in want if x not in have][:3], [x for x in have if x not in want][:3]))
     exp = out["expect"]
     if got["dates"] != exp["dates"]:
         fails.append(("saved: dates", [d for d in got["dates"] if d not in exp["dates"]] + ["/"] + [d for d in exp["dates"] if d not in got["dates"]]))
