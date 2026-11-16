@@ -229,6 +229,7 @@ def extract(xlsx_path):
             "isLiability": is_liability(c["name"], series, c["rawCategory"]),
             "closed": closed,
             "unfunded": unfunded,
+            "auto": ("unfunded" if unfunded else "closed") if closed else None,
             "lastHeld": dates[last_held] if last_held is not None else None,
             "series": series,
             "carried": carried,

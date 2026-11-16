@@ -87,7 +87,8 @@ a shortcut or shell alias.
 - **Values: $ / %** — one switch for every figure on the page (see below).
 - **Closed accounts** — show or hide accounts you no longer hold.
 - **Exclude** — leave chosen accounts out of every total, chart, debt ratio and
-  the projection; see [Excluding accounts](#excluding-accounts).
+  the projection, with a box at the top to tick or untick them all; see
+  [Excluding accounts](#excluding-accounts).
 - **Table view** — every number in the workbook, for the current filters.
 
 **A net worth chart you can put anything on**
@@ -96,6 +97,9 @@ Plot up to four series alongside — or instead of — net worth: individual
 accounts, a total per person, or a total per category. Switch the net worth line
 off and the smaller lines get the full axis. Hover for values at any snapshot, or
 focus the chart and walk it with ← →.
+
+Next to net worth: **money in**, **card spending** and **what's left after
+spending** this month (beta, worked out from balances; hover the `?` on each).
 
 **Then:** stat tiles per category · assets stacked by category over time ·
 balances owed · debt-to-assets and debt-to-liquid ratios (hover the `?` for what
@@ -149,6 +153,16 @@ Cash, property, custom categories and debt are held at today's balance.
 Compounding is monthly, with contributions landing at month end. It's a
 straight-line average-return model — real returns vary year to year, so treat
 the output as a rough guide rather than a forecast.
+
+**A Spending tab (beta)**
+
+Month by month from your balances: card spending (every rise in a card's
+balance from one snapshot to the next, so never negative), money in (the change
+in cash accounts plus what was paid off on cards) and what's left, for every
+month with a snapshot before it, plus complete-month averages. Click a month for
+each account's part. **Export summary** downloads the monthly figures and the
+breakdown as a spreadsheet. Transfers between accounts blur these figures, and
+the tab says so.
 
 ### The $ / % switch
 
