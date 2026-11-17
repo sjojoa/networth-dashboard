@@ -197,8 +197,14 @@ export function invalidTracker(t) {
     if (a.owner !== null && !owners.includes(a.owner)) return `Account "${a.name}" has an owner that isn't in the legend.`;
     if (a.rawCategory !== null && !isText(a.rawCategory, 100)) return `Account "${a.name}" has an unreadable category.`;
   }
+  // Budgets, goals and statements find accounts by name, so two of the same name would mix up.
+  const names = accounts.map((a) => a.name.trim().toLowerCase());
+  const twin = accounts.find((a, i) => names.indexOf(names[i]) !== i);
+  if (twin) return `Two accounts are called "${twin.name.trim()}". Give each a different name.`;
   if (!Array.isArray(dates) || !dates.length || dates.length > 10000) return "Expected 1–10,000 dated snapshots.";
   if (!dates.every((d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d))) return "Dates must be YYYY-MM-DD.";
+  const twinDate = dates.find((d, i) => dates.indexOf(d) !== i);
+  if (twinDate) return `Two rows have the date ${twinDate}. Merge them into one.`;
   if (!Array.isArray(rows) || rows.length !== dates.length) return "Every snapshot needs a row of balances.";
   for (const r of rows) {
     if (!Array.isArray(r) || r.length !== accounts.length) return "Every row needs one value per account.";

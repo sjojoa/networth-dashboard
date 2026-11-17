@@ -296,6 +296,14 @@ def statements_and_transactions(sheets, account_id):
     return {"statements": statements, "transactions": transactions}
 
 
+def col_letter(n):
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
 def extract(xlsx_path):
     sheets = xlsx_reader.load(xlsx_path)
     sheet = sheets[0]
@@ -337,6 +345,16 @@ def extract(xlsx_path):
         found.append((raw_date.strftime("%Y-%m-%d"), row, values))
     # Date order, as the hosted version keeps it, so a row typed out of order still lands in place.
     found.sort(key=lambda f: f[0])
+    # Budgets, goals and statements find accounts by name, and edits find rows by date: twins would mix up.
+    seen = {}
+    for c in columns:
+        if c["name"].lower() in seen:
+            raise SystemExit(f'Two accounts are called "{c["name"]}" (columns {col_letter(seen[c["name"].lower()])} '
+                             f'and {col_letter(c["col"])}). Give each a different name.')
+        seen[c["name"].lower()] = c["col"]
+    for (d1, r1, _), (d2, r2, _) in zip(found, found[1:]):
+        if d1 == d2:
+            raise SystemExit(f"Rows {r1} and {r2} both have the date {d1}. Merge them into one row.")
     dates = [f[0] for f in found]
     rows = [f[2] for f in found]
     sheet_rows = [f[1] for f in found]

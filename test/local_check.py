@@ -237,6 +237,18 @@ def main():
     print("after rebuilding from the saved workbook:", after_rebuild)
     if not after_rebuild or after_rebuild["kept"] is not None or not after_rebuild["bar"]:
         fails.append(("edits not dropped after rebuilding from the saved workbook", after_rebuild))
+    # A name or a date twice is refused with a message saying where.
+    import openpyxl
+    for what, edit, want in (("name", lambda ws: setattr(ws.cell(4, 3), "value", ws.cell(4, 2).value), "Two accounts"),
+                             ("date", lambda ws: setattr(ws.cell(6, 1), "value", ws.cell(5, 1).value), "both have the date")):
+        wb = openpyxl.load_workbook(BOOK); edit(wb.worksheets[0]); wb.save(tmp / f"twin-{what}.xlsx")
+        try:
+            build_dashboard.extract(tmp / f"twin-{what}.xlsx"); got = "accepted"
+        except SystemExit as e:
+            got = str(e)
+        print(f"twin {what}:", got)
+        if want not in got:
+            fails.append((f"a {what} twice was not refused", got))
     if fails:
         print("FAIL"); [print(" ", f) for f in fails]; sys.exit(1)
     print("local checks: OK")
