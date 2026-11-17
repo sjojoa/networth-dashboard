@@ -19,6 +19,7 @@ NS = {
     "pr": "http://schemas.openxmlformats.org/package/2006/relationships",
 }
 EPOCH = datetime.date(1899, 12, 30)  # Excel's day 0 (1900 date system)
+EPOCH_1904 = datetime.date(1904, 1, 1)  # some older Mac workbooks count from here
 
 # Built-in number formats that mean "this number is a date".
 BUILTIN_DATE_FMTS = set(range(14, 23)) | set(range(27, 37)) | set(range(45, 48)) | set(range(50, 59))
@@ -126,6 +127,8 @@ def load(path):
     with zipfile.ZipFile(path) as zf:
         strings = _shared_strings(zf)
         fill_by_style, date_by_style = _styles(zf)
+        pr = ET.fromstring(zf.read("xl/workbook.xml")).find("m:workbookPr", NS)
+        epoch = EPOCH_1904 if pr is not None and pr.get("date1904") in ("1", "true") else EPOCH
 
         sheets = []
         for name, sheet_path in _sheet_paths(zf):
@@ -156,7 +159,7 @@ def load(path):
                     if value.is_integer() and abs(value) < 1e15:
                         value = int(value)
                     if style < len(date_by_style) and date_by_style[style]:
-                        value = EPOCH + datetime.timedelta(days=float(v.text))
+                        value = epoch + datetime.timedelta(days=float(v.text))
 
                 fill = fill_by_style[style] if style < len(fill_by_style) else None
                 if value is not None or fill is not None:

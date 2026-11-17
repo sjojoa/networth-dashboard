@@ -3167,7 +3167,7 @@ function renderStatements() {
     }
     const range = st.first_date ? ` · ${shortDate(st.first_date)} – ${longDate(st.last_date)}` : "";
     return `<div class="st-row"><div><div class="nm">${esc(st.source)}</div>`
-      + `<div class="sub">${plural(st.count, "transaction")}${range} · ${esc(st.format.toUpperCase())} · uploaded ${longDate(st.uploaded_at.slice(0, 10))}${st.uploaded_by ? ` by ${esc(st.uploaded_by)}` : ""}</div>`
+      + `<div class="sub">${plural(st.count, "transaction")}${range} · ${esc(st.format.toUpperCase())} · uploaded ${longDate(st.uploaded_at.includes("T") ? localIso(new Date(st.uploaded_at)) : st.uploaded_at.slice(0, 10))}${st.uploaded_by ? ` by ${esc(st.uploaded_by)}` : ""}</div>`
       + (a ? "" : `<div class="sub warn">Its account "${esc(st.account_name)}" isn't in your accounts any more. Pick one.</div>`) + check + `</div>`
       + `<div class="act"><select class="tx-acct-sel" data-st-acct="${st.id}" aria-label="Account for ${esc(st.source)}">`
       + `${a ? "" : `<option value="" selected>Pick an account</option>`}${options(st.account_id)}</select>`
@@ -5376,7 +5376,8 @@ function parseMoney(text) {
   return /^[+-]?(\d+\.?\d*|\.\d+)$/.test(t) ? parseFloat(t) : NaN;
 }
 const plainNumber = (v) => String(Math.round(v * 100) / 100);
-const todayIso = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const localIso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const todayIso = () => localIso(new Date());
 
 /** A confirm dialog whose default is Cancel. Resolves true only on the red button. */
 function ask(title, text, okLabel) {
