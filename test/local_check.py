@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""Checks for the local dashboard's editing, run in headless Chrome (sample workbook only).
+
+1. Parity: the page's own DATA (model.js, redone in the browser) matches what
+   build_dashboard.py wrote, field by field.
+2. Edits: snapshots added, changed and deleted, an account's details and an
+   Open/Closed status, through the same api() calls the hosted page makes;
+   they're kept in this browser and show after a reload.
+3. Save to workbook: the sample workbook patched with those edits is read back
+   by build_dashboard.py, and must give the edited data (and keep its other cells).
+
+    python3 test/local_check.py
+"""
+import base64, json, re, shutil, subprocess, sys, tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import build_dashboard  # noqa: E402
+
+CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+BOOK = ROOT / "NetWorthTracker.xlsx"
+
+PROBE = r"""
+<script>
+window.__errors = [];
+addEventListener("error", (e) => __errors.push(String(e.message)));
+addEventListener("unhandledrejection", (e) => __errors.push(String(e.reason && e.reason.message || e.reason)));
+</script>
+"""
+
+RUN = r"""
+<script>
+(async () => {
+  const out = { errors: __errors };
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const step = localStorage.getItem("probe-step") || "1";
+    if (step === "1") {
+      localStorage.clear(); localStorage.setItem("probe-step", "1b");
+      location.reload(); return;
+    }
+    if (step === "1b") {
+      out.data = { source: DATA.source, generated: DATA.generated, dates: DATA.dates, accounts: DATA.accounts, owners: DATA.owners,
+                   categoryOrder: DATA.categoryOrder, closedRun: DATA.closedRun };
+      out.views = [];
+      for (const v of ["dash", "accounts", "proj", "entries", "spending", "settings"]) { setView(v); await tick(30); out.views.push(state.view); }
+      out.nav = [...document.querySelectorAll(".nav-item")].filter((n) => !n.hidden && !n.closest("[hidden]")).map((n) => n.textContent.trim());
+      out.barHidden = $id("localBar").hidden;
+      const ids = EDIT.accounts.map((a) => a.id), sid = EDIT.snapshotIds;
+      const calls = [
+        ["PUT", "/api/spending/budget", { budgets: [[ids[14], 600]] }],
+        ["POST", "/api/goals", { kind: "debt", name: "Card paid off", date: "2027-06-01", holdings: [{ accountId: ids[14], amount: null }], start: 900 }],
+        ["POST", "/api/goals", { kind: "save", name: "Holiday", target: 5000, holdings: [{ accountId: ids[2], amount: 3000 }], monthly: 200 }],
+        ["POST", "/api/snapshots", { date: "2026-08-28", balances: [[ids[0], 9000], [ids[1], null], [ids[2], 15000.5]] }],
+        ["POST", "/api/snapshots", { date: "2024-08-16", balances: [[ids[0], 4000]] }],
+        ["PUT", `/api/snapshots/${sid[sid.length - 1]}`, { date: "2026-08-21", balances: [[ids[0], 8300.25]] }],
+        ["DELETE", `/api/snapshots/${sid[3]}`],
+        ["PUT", `/api/accounts/${ids[14]}`, { name: "Visa card", type: "Credit card", ownerId: EDIT.accounts[14].ownerId, institution: "Demo Bank",
+          last4: "0042", notes: "Paid in full", status: "open", creditLimit: 5000, interestRate: 21.9 }],
+        ["PUT", "/api/accounts/status", { changes: [[ids[8], "open"]] }],
+      ];
+      out.results = [];
+      for (const [m, p, b] of calls) { try { out.results.push(await api(m, p, b)); } catch (e) { out.results.push("ERR " + e.message); } }
+      // Transactions: a made-up statement, the same one again (all skipped), a rule, one change by hand.
+      const c = parseCsv(window.__ST), got = csvRows(c.slice(3), guessMapping(c[2]), 3);
+      const upload = { accountId: ids[0], source: "demo-checking-4821.csv", format: "csv", endingBalance: got.endingBalance, endingDate: got.endingDate,
+        mapping: { key: "demo", value: guessMapping(c[2]) }, rows: got.rows.map((r) => [r.date, r.description, r.cents, null]) };
+      out.tx = { first: await api("POST", "/api/statements", upload), again: await api("POST", "/api/statements", upload) };
+      out.tx.rules = await api("PUT", "/api/transactions/rules", { rules: [{ contains: "payroll", category: "Income" }] });
+      const listed = await api("GET", "/api/transactions");
+      await api("PUT", "/api/transactions", { changes: [[listed.transactions[0].id, "Groceries", null]] });
+      out.tx.listed = listed.transactions.length;
+      out.refused = [];
+      for (const [m, p, b] of [["POST", "/api/snapshots", { date: "2026-08-28", balances: [[ids[0], 1]] }],
+                               ["POST", "/api/snapshots", { date: "2026-02-30", balances: [[ids[0], 1]] }],
+                               ["POST", "/api/snapshots", { date: "2026-09-04", balances: [[ids[0], 0]] }],
+                               ["PUT", `/api/accounts/${ids[0]}`, { name: "Total", type: "Cash", ownerId: 1 }],
+                               ["POST", "/api/owners", { name: "Zed" }]]) {
+        try { await api(m, p, b); out.refused.push("accepted"); } catch (e) { out.refused.push(e.message); }
+      }
+      localStorage.setItem("probe-step", "2");
+      localStorage.setItem("probe-out1", JSON.stringify(out));
+      location.reload(); return;
+    }
+    if (step === "2") {
+      const first = JSON.parse(localStorage.getItem("probe-out1"));
+      out.first = first;
+      out.after = { dates: DATA.dates.length, first: DATA.dates[0], last: DATA.dates[DATA.dates.length - 1],
+                    card: DATA.accounts[14].name, cardDetails: EDIT.accounts[14], old401: [DATA.accounts[8].name, DATA.accounts[8].closed, DATA.accounts[8].auto],
+                    checkingLast: DATA.accounts[0].series[DATA.accounts.length ? DATA.dates.length - 2 : 0] };
+      out.bar = $id("localBar").hidden ? null : $id("localBarText").textContent;
+      const tl = await api("GET", "/api/transactions");
+      out.txAfter = { statements: tl.statements.map((x) => [x.source, x.count]), cats: tl.transactions.map((t) => t.category), rules: DATA.tx.rules, maps: Object.keys(DATA.tx.mappings) };
+      out.expectTx = tl;
+      out.settings = { budget: DATA.spendingBudget, goals: DATA.goals.map((g) => [g.name, g.account || (g.accounts || []).map((h) => h.name + " " + h.amount).join()]) };
+      setView("goals"); await tick(30);
+      out.goalsView = { view: state.view, nav: !$id("navGoals").hidden, cards: [...document.querySelectorAll(".goal-card h3")].map((h) => h.textContent), localNote: !$id("goalsLocal").hidden };
+      out.kept = $id("keptNote").textContent;
+      const bytes = Uint8Array.from(atob(window.__BOOK), (c) => c.charCodeAt(0));
+      const patched = await patchWorkbook(bytes);
+      let bin = ""; for (let i = 0; i < patched.length; i += 8192) bin += String.fromCharCode(...patched.subarray(i, i + 8192));
+      out.patched = btoa(bin);
+      // A workbook changed in Excel since the build (a renamed column) is refused.
+      try { await patchWorkbook(Uint8Array.from(atob(window.__BOOK2), (c) => c.charCodeAt(0))); out.stale = "accepted"; } catch (e) { out.stale = e.message; }
+      // Filled-down (shared) formulas: a deleted row's shared Total is kept; changing a shared formula's top cell is refused.
+      const book = (k) => Uint8Array.from(atob(window[k]), (c) => c.charCodeAt(0));
+      try { const z = readZip(await patchWorkbook(book("__BOOK3"))).find((e) => e.name === "xl/worksheets/sheet1.xml");
+            out.sharedTotal = (await zipEntryText(z)).match(/<c r="R8"[^>]*>.*?<\/c>/)[0]; } catch (e) { out.sharedTotal = "ERR " + e.message; }
+      try { await patchWorkbook(book("__BOOK4")); out.sharedEdit = "accepted"; } catch (e) { out.sharedEdit = e.message; }
+      // Another tab changed what's kept: this one refuses instead of writing over it.
+      const k = localKey(LOCAL.raw), was = localStorage.getItem(k);
+      out.key = k;
+      localStorage.setItem(k, was + " ");
+      try { await api("POST", "/api/snapshots", { date: "2026-12-04", balances: [[EDIT.accounts[0].id, 1]] }); out.otherTab = "accepted"; } catch (e) { out.otherTab = e.message; }
+      try { await saveToWorkbook(); out.otherTabSave = "accepted"; } catch (e) { out.otherTabSave = e.message; }
+      localStorage.setItem(k, was);
+      out.ops = LOCAL.store.ops;
+      out.expect = { dates: DATA.dates, accounts: DATA.accounts.map((a) => ({ name: a.name, series: a.series, closed: a.closed })), edit: EDIT.accounts };
+      out.errors = __errors;
+      localStorage.clear();
+      document.getElementById("probeOut").textContent = JSON.stringify(out);
+    }
+  } catch (e) { out.errors.push("probe: " + e.message + " " + e.stack); document.getElementById("probeOut").textContent = JSON.stringify(out); }
+})();
+</script>
+<pre id="probeOut"></pre>
+"""
+
+
+def main():
+    tmp = Path(tempfile.mkdtemp())
+    for f in ("build_dashboard.py", "xlsx_reader.py", "template.html", "model.js", "NetWorthTracker.xlsx"):
+        shutil.copy(ROOT / f, tmp / f)
+    build = subprocess.run([sys.executable, str(tmp / "build_dashboard.py"), str(tmp / "NetWorthTracker.xlsx")], capture_output=True, text=True)
+    if build.returncode:
+        sys.exit(build.stderr)
+    html = (tmp / "NetWorth_Dashboard.html").read_text(encoding="utf-8")
+    expected = json.loads(re.search(r"withLocalEdits\((\{.*?\})\);\n", html, re.S).group(1))
+    book64 = base64.b64encode(BOOK.read_bytes()).decode()
+    # The same workbook with a column renamed in "Excel", for the stale check.
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(BOOK) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "xl/sharedStrings.xml":
+                data = data.replace(b"<t>Checking</t>", b"<t>Everyday checking</t>", 1)
+            zout.writestr(item, data)
+    book2 = base64.b64encode(buf.getvalue()).decode()
+
+    def sheet_variant(*swaps):
+        b = io.BytesIO()
+        with zipfile.ZipFile(BOOK) as zin, zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    for old, new in swaps:
+                        assert old.encode() in data, old
+                        data = data.replace(old.encode(), new.encode(), 1)
+                zout.writestr(item, data)
+        return base64.b64encode(b.getvalue()).decode()
+    # Total filled down from row 8 (the row the probe deletes), and a balance the probe changes (B109) as a shared formula's top cell.
+    book3 = sheet_variant(('<c r="R8"><f>SUM(B8:Q8)</f>', '<c r="R8"><f t="shared" ref="R8:R9" si="0">SUM(B8:Q8)</f>'),
+                          ('<f>SUM(B9:Q9)</f>', '<f t="shared" si="0"/>'))
+    book4 = sheet_variant(('<c r="B109"><v>8270.21</v>', '<c r="B109"><f t="shared" ref="B109:B109" si="7">8270.21</f><v>8270.21</v>'))
+    html = html.replace("<head>", "<head>" + PROBE, 1).replace("</body>", f"<script>window.__BOOK = {json.dumps(book64)}; window.__BOOK2 = {json.dumps(book2)}; window.__BOOK3 = {json.dumps(book3)}; window.__BOOK4 = {json.dumps(book4)}; window.__ST = {json.dumps((ROOT / 'test/statements/demo-checking-4821.csv').read_text())};</script>" + RUN + "</body>", 1)
+    page = tmp / "probe.html"
+    page.write_text(html, encoding="utf-8")
+    profile = tmp / "profile"
+    dom = subprocess.run([CHROME, "--headless=new", "--disable-gpu", f"--user-data-dir={profile}", "--allow-file-access-from-files",
+                          "--window-size=1280,900", "--virtual-time-budget=60000", "--dump-dom", page.as_uri()],
+                         capture_output=True, text=True, timeout=240).stdout
+    m = re.search(r'<pre id="probeOut">(.*?)</pre>', dom, re.S)
+    if not m or not m.group(1).strip():
+        sys.exit("no result from the page")
+    import html as H
+    out = json.loads(H.unescape(m.group(1)))
+    fails = []
+    if "first" not in out: sys.exit(f"probe failed: {out}"[:3000])
+    first = out["first"]
+    if first["errors"] or out["errors"]:
+        fails.append(("page errors", first["errors"] + out["errors"]))
+    # The page adds cssVar and carriedSet to each account as it starts, and type (as the hosted server does).
+    for a in first["data"]["accounts"]:
+        a.pop("cssVar", None); a.pop("carriedSet", None); a.pop("type", None)
+    for k in ("source", "generated", "dates", "accounts", "owners", "categoryOrder", "closedRun"):
+        if first["data"][k] != expected[k]:
+            detail = "differs"
+            if k == "accounts":
+                for a, b in zip(first["data"][k], expected[k]):
+                    keys = [f for f in set(a) | set(b) if a.get(f) != b.get(f)]
+                    if keys:
+                        detail = (b["name"], {f: (a.get(f), b.get(f)) for f in keys}); break
+            fails.append((f"parity: {k}", detail))
+    print("views:", first["views"], "| nav:", first["nav"], "| bar hidden at start:", first["barHidden"])
+    print("results:", first["results"])
+    print("refused:", first["refused"])
+    print("after reload:", {k: v for k, v in out["after"].items() if k != "cardDetails"})
+    print("card details:", out["after"]["cardDetails"])
+    print("bar:", out["bar"])
+    print("stale workbook:", out["stale"])
+    print("transactions:", first["tx"])
+    print("transactions after reload:", out["txAfter"])
+    if first["tx"]["again"].get("id") is not None or first["tx"]["again"].get("added") != 0:
+        fails.append(("a repeated statement wasn't skipped", first["tx"]["again"]))
+    print("settings:", out["settings"])
+    print("goals view:", out["goalsView"])
+    print("kept note:", out["kept"])
+    if out["settings"] != {"budget": {"visa card": 600}, "goals": [["Card paid off", "Visa card"], ["Holiday", "HYSA 3000"]]}:
+        fails.append(("goals and budgets (renamed with the account)", out["settings"]))
+    if out["goalsView"] != {"view": "goals", "nav": True, "cards": ["Card paid off", "Holiday"], "localNote": False}:
+        fails.append(("goals view", out["goalsView"]))
+    print("shared Total kept:", out["sharedTotal"], "| shared top cell:", out["sharedEdit"])
+    if 'ref="R8:R9"' not in out["sharedTotal"]:
+        fails.append(("a deleted row's shared Total formula was not kept", out["sharedTotal"]))
+    if "B109" not in out["sharedEdit"]:
+        fails.append(("changing a shared formula's top cell was not refused", out["sharedEdit"]))
+    print("other tab:", out["otherTab"], "|", out["otherTabSave"], "| key:", out["key"])
+    if "another tab" not in out["otherTab"] or "another tab" not in out["otherTabSave"]:
+        fails.append(("a change from a stale tab was not refused", out["otherTab"], out["otherTabSave"]))
+    if out["key"] != "nw-local-edits:" + expected["bookId"]:
+        fails.append(("edits not kept under the workbook's id", out["key"]))
+    if "changed since this dashboard was built" not in out["stale"]:
+        fails.append(("stale workbook accepted", out["stale"]))
+    # Save to workbook, read back by build_dashboard.py
+    saved = tmp / "saved.xlsx"
+    saved.write_bytes(base64.b64decode(out["patched"]))
+    got = build_dashboard.extract(saved)
+    saved_tx = got["txStore"]
+    want = sorted((t["date"], t["description"], t["amount"], t["category"]) for t in out["expectTx"]["transactions"])
+    have = sorted((t["date"], t["description"], t["amount"], t["category"]) for t in saved_tx["transactions"])
+    print("saved transactions:", len(have), "of", len(want), "| statements:", [(x["source"], x["account_name"]) for x in saved_tx["statements"]])
+    if want != have:
+        fails.append(("saved transactions differ", [x for x in want if x not in have][:3], [x for x in have if x not in want][:3]))
+    exp = out["expect"]
+    if got["dates"] != exp["dates"]:
+        fails.append(("saved: dates", [d for d in got["dates"] if d not in exp["dates"]] + ["/"] + [d for d in exp["dates"] if d not in got["dates"]]))
+    for a, e in zip(got["accounts"], exp["accounts"]):
+        if a["name"] != e["name"] or a["series"] != e["series"] or a["closed"] != e["closed"]:
+            fails.append(("saved: account " + e["name"], {"name": a["name"], "closed": a["closed"]}))
+    det = {k: got["edit"]["accounts"][14][k] for k in ("type", "institution", "last4", "notes", "status", "creditLimit", "interestRate")}
+    print("saved card details:", det)
+    if det != {k: exp["edit"][14][k] for k in det}:
+        fails.append(("saved: details", det))
+    import zipfile
+    with zipfile.ZipFile(saved) as z:
+        names = z.namelist()
+        sheet = z.read("xl/worksheets/sheet1.xml").decode()
+    tot = re.findall(r'<c r="R(\d+)"[^>]*><f>([^<]*)</f>', sheet)[-3:]
+    print("saved parts:", names)
+    print("last Total formulas:", tot)
+    # Rebuild from the saved workbook: the kept edits replay as no change, so they're dropped.
+    shutil.copy(saved, tmp / "NetWorthTracker.xlsx")
+    subprocess.run([sys.executable, str(tmp / "build_dashboard.py"), str(tmp / "NetWorthTracker.xlsx")], check=True, capture_output=True)
+    html2 = (tmp / "NetWorth_Dashboard.html").read_text(encoding="utf-8")
+    ops = out["ops"]
+    check = r"""<pre id="probeOut"></pre><script>
+(() => {
+  const o = document.getElementById("probeOut");
+  if (!localStorage.getItem("ops-set")) {
+    localStorage.clear(); localStorage.setItem("ops-set", "1");
+    localStorage.setItem(localKey(LOCAL.raw), JSON.stringify({ ops: __OPS, savedAt: 1, nextId: 1000002 }));
+    location.reload(); return;
+  }
+  o.textContent = JSON.stringify({ kept: localStorage.getItem(localKey(LOCAL.raw)), bar: document.getElementById("localBar").hidden, n: DATA.dates.length });
+})();
+</script>""".replace("__OPS", json.dumps(ops))
+    (tmp / "probe2.html").write_text(html2.replace("</body>", check + "</body>", 1), encoding="utf-8")
+    dom2 = subprocess.run([CHROME, "--headless=new", "--disable-gpu", f"--user-data-dir={tmp / 'profile2'}", "--virtual-time-budget=30000",
+                           "--dump-dom", (tmp / "probe2.html").as_uri()], capture_output=True, text=True, timeout=240).stdout
+    m2 = re.search(r'<pre id="probeOut">(.*?)</pre>', dom2, re.S)
+    after_rebuild = json.loads(H.unescape(m2.group(1))) if m2 and m2.group(1).strip() else None
+    if after_rebuild is None:
+        print("rebuild probe page:", (dom2 or "")[-600:])
+    print("after rebuilding from the saved workbook:", after_rebuild)
+    if not after_rebuild or after_rebuild["kept"] is not None or not after_rebuild["bar"]:
+        fails.append(("edits not dropped after rebuilding from the saved workbook", after_rebuild))
+    # A name or a date twice is refused with a message saying where.
+    import openpyxl
+    for what, edit, want in (("text", lambda ws: setattr(ws.cell(5, 2), "value", "abc"), "Cell B5 isn't a number"),
+                             ("name", lambda ws: setattr(ws.cell(4, 3), "value", ws.cell(4, 2).value), "Two accounts"),
+                             ("date", lambda ws: setattr(ws.cell(6, 1), "value", ws.cell(5, 1).value), "both have the date")):
+        wb = openpyxl.load_workbook(BOOK); edit(wb.worksheets[0]); wb.save(tmp / f"twin-{what}.xlsx")
+        try:
+            build_dashboard.extract(tmp / f"twin-{what}.xlsx"); got = "accepted"
+        except SystemExit as e:
+            got = str(e)
+        print(f"refused ({what}):", got)
+        if want not in got:
+            fails.append((f"a {what} twice was not refused", got))
+    wb = openpyxl.load_workbook(BOOK); ws = wb.worksheets[0]
+    as_number = ws.cell(5, 2).value; ws.cell(5, 2).value = f" {as_number} "; wb.save(tmp / "text-number.xlsx")
+    read = build_dashboard.extract(tmp / "text-number.xlsx")["accounts"][0]["series"][0]
+    print("a balance typed as text:", read)
+    if read != round(as_number, 2):
+        fails.append(("a balance typed as text was not read", read, as_number))
+    if fails:
+        print("FAIL"); [print(" ", f) for f in fails]; sys.exit(1)
+    print("local checks: OK")
+
+
+if __name__ == "__main__":
+    main()
