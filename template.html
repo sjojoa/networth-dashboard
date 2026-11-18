@@ -4782,7 +4782,8 @@ function setView(view) {
   document.getElementById("viewEyebrow").textContent = EYEBROW;
   document.getElementById("viewTitle").textContent = VIEWS[view].title;
   document.getElementById("viewIntro").textContent = VIEWS[view].intro;
-  if (history.replaceState) history.replaceState(null, "", VIEWS[view].hash || location.pathname + location.search);
+  // window.: the page's own `history` is the undo list. The hash keeps this tab across a save's reload.
+  window.history.replaceState(null, "", VIEWS[view].hash || location.pathname + location.search);
   renderAll();
 }
 
