@@ -17,6 +17,7 @@ Usage:
 """
 
 import datetime
+import hashlib
 import json
 import re
 import sys
@@ -296,6 +297,18 @@ def statements_and_transactions(sheets, account_id):
     return {"statements": statements, "transactions": transactions}
 
 
+NUMBER_TEXT = re.compile(r"^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$", re.I)
+
+
+def to_number(v, row, col):
+    """A balance: a number, or text that is one (cells formatted as Text), as the import page reads it."""
+    if isinstance(v, (int, float)):
+        return v
+    if isinstance(v, str) and NUMBER_TEXT.match(v):
+        return float(v)
+    raise SystemExit(f"Cell {col_letter(col)}{row} isn't a number ({v!r}). Fix it in the workbook, then build again.")
+
+
 def col_letter(n):
     s = ""
     while n:
@@ -341,7 +354,7 @@ def extract(xlsx_path):
         values = [sheet.cell(row, c["col"]).value for c in columns]
         if all(is_blank(v) or v == 0 for v in values):
             continue  # empty template row
-        values = [None if is_blank(v) or not isinstance(v, (int, float)) else v for v in values]
+        values = [None if is_blank(v) else to_number(v, row, c["col"]) for v, c in zip(values, columns)]
         found.append((raw_date.strftime("%Y-%m-%d"), row, values))
     # Date order, as the hosted version keeps it, so a row typed out of order still lands in place.
     found.sort(key=lambda f: f[0])
@@ -393,6 +406,8 @@ def extract(xlsx_path):
 
     return {
         "source": Path(xlsx_path).name,
+        # Names this workbook's browser storage; a hash, so the path itself isn't written into the page.
+        "bookId": hashlib.sha256(str(Path(xlsx_path).resolve()).encode()).hexdigest()[:12],
         "generated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "dates": dates,
         "accounts": accounts,

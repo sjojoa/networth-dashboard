@@ -1446,12 +1446,21 @@ const MODEL = (() => {
 })();
 let LOCAL = null;   // { raw, store: { ops, savedAt, nextId }, state, dropped }
 
-const localKey = (raw) => `nw-local-edits:${raw.source}`;
+// Keyed by the workbook's path (hashed), so the sample and a real tracker of the same name don't share edits.
+const localKey = (raw) => `nw-local-edits:${raw.bookId || raw.source}`;
+/* What this tab last read or wrote under each key: if storage differs, another tab changed it. */
+const SEEN = {};
+const storedText = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+function stopIfChangedElsewhere() {
+  if ([localKey(LOCAL.raw), settingsKey(LOCAL.raw)].some((k) => storedText(k) !== SEEN[k])) {
+    throw new Error("This dashboard was changed in another tab or window. Reload this one first, so nothing is lost.");
+  }
+}
 function readLocal(raw) {
-  try { const s = JSON.parse(localStorage.getItem(localKey(raw)) || "null"); return s && Array.isArray(s.ops) ? s : null; } catch (e) { return null; }
+  try { const s = JSON.parse((SEEN[localKey(raw)] = localStorage.getItem(localKey(raw))) || "null"); return s && Array.isArray(s.ops) ? s : null; } catch (e) { return null; }
 }
 function writeLocal(raw, s) {
-  try { if (s && s.ops.length) localStorage.setItem(localKey(raw), JSON.stringify(s)); else localStorage.removeItem(localKey(raw)); return true; }
+  try { if (s && s.ops.length) localStorage.setItem(localKey(raw), JSON.stringify(s)); else localStorage.removeItem(localKey(raw)); SEEN[localKey(raw)] = storedText(localKey(raw)); return true; }
   catch (e) { return false; }
 }
 
@@ -1707,6 +1716,7 @@ async function localApi(method, path, body) {
       transactions: S.tx.slice().sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : y.id - x.id)),
     };
   }
+  stopIfChangedElsewhere();
   const settled = settingsApi(method, path, body || {});
   if (settled !== undefined) return settled;
   if (LOCAL.store.savedAt) {
@@ -1758,15 +1768,15 @@ async function localApi(method, path, body) {
 /* Settings the workbook doesn't hold (goals, card budgets) are kept in this browser
    too, but take effect at once: they never go to the workbook, so there's nothing to
    save. Settings → Kept in this browser backs them up to a file and restores them. */
-const settingsKey = (raw) => `nw-local-settings:${raw.source}`;
+const settingsKey = (raw) => `nw-local-settings:${raw.bookId || raw.source}`;
 function readSettings(raw) {
-  try { const s = JSON.parse(localStorage.getItem(settingsKey(raw)) || "null"); if (s && typeof s === "object") return { spendingBudget: s.spendingBudget || {}, goals: Array.isArray(s.goals) ? s.goals : [],
+  try { const s = JSON.parse((SEEN[settingsKey(raw)] = localStorage.getItem(settingsKey(raw))) || "null"); if (s && typeof s === "object") return { spendingBudget: s.spendingBudget || {}, goals: Array.isArray(s.goals) ? s.goals : [],
     rules: Array.isArray(s.rules) ? s.rules : [], mappings: s.mappings && typeof s.mappings === "object" ? s.mappings : {} }; }
   catch (e) { /* none yet */ }
   return { spendingBudget: {}, goals: [], rules: [], mappings: {} };
 }
 function writeSettings(raw, s) {
-  try { localStorage.setItem(settingsKey(raw), JSON.stringify(s)); return true; } catch (e) { return false; }
+  try { localStorage.setItem(settingsKey(raw), JSON.stringify(s)); SEEN[settingsKey(raw)] = storedText(settingsKey(raw)); return true; } catch (e) { return false; }
 }
 const LOCAL_GOAL_KINDS = ["save", "debt", "networth"];
 
@@ -4970,7 +4980,14 @@ function sheetCells(doc, strings) {
     if (t === "b") return v.textContent === "1";
     return Number(v.textContent);
   };
-  const clear = (c) => { [...c.childNodes].forEach((n) => c.removeChild(n)); c.removeAttribute("t"); };
+  const clear = (c) => {
+    // A filled-down formula is stored once, in its top cell; the cells below point to it. Emptying that cell breaks them all.
+    const f = kid(c, "f");
+    if (f && f.getAttribute("t") === "shared" && f.getAttribute("ref")) {
+      throw new Error(`Cell ${c.getAttribute("r")} holds a formula that the cells below it share, so it can't be changed from here. Change it in Excel, then rebuild the dashboard; your changes stay in this browser.`);
+    }
+    [...c.childNodes].forEach((n) => c.removeChild(n)); c.removeAttribute("t");
+  };
   const setNumber = (c, v) => { clear(c); const el = make("v"); el.textContent = String(v); c.appendChild(el); };
   const setText = (c, text) => {
     clear(c); c.setAttribute("t", "inlineStr");
@@ -5062,7 +5079,7 @@ async function patchWorkbook(bytes) {
 
   // Snapshots: changed cells, deleted rows emptied, new rows below the last one.
   const lastRow = Math.max(...sh.rows), tpl = (c) => X.cell(lastRow, c);
-  const cols = [1, ...sh.cols, ...(sh.totalCol ? [sh.totalCol] : [])];
+  const cols = [1, ...sh.cols];   // a deleted row keeps its Total: with no date it's skipped, and its formula may be one others share
   const put = (r, i, v) => {
     const c = X.cell(r, sh.cols[i], true);
     if (v === null) X.clear(c); else X.setNumber(c, v);
@@ -5190,6 +5207,7 @@ function pickWorkbookFile() {
 }
 
 async function saveToWorkbook() {
+  stopIfChangedElsewhere();
   let dir = null, file = null, bytes;
   if (window.showDirectoryPicker) {
     dir = await savedFolder();
@@ -5215,6 +5233,13 @@ async function saveToWorkbook() {
     const copy = await backups.getFileHandle(`${DATA.source.replace(/\.xlsx$/i, "")} ${stamp}.xlsx`, { create: true });
     let w = await copy.createWritable(); await w.write(bytes); await w.close();
     w = await file.createWritable(); await w.write(out); await w.close();
+    // Keep the newest 20 copies of this workbook; the stamp sorts by time.
+    const base = DATA.source.replace(/\.xlsx$/i, "").replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+    const ours = new RegExp(`^${base} \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}-\\d{2}\\.xlsx$`), copies = [];
+    try {
+      for await (const name of backups.keys()) if (ours.test(name)) copies.push(name);
+      for (const name of copies.sort().slice(0, -20)) await backups.removeEntry(name);
+    } catch (e) { /* pruning is a nicety; the save itself is done */ }
   } else {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
@@ -5277,7 +5302,7 @@ function buildKept() {
     if (!(await ask("Restore this backup?", `It replaces the goals, card budgets, Projection settings and exclusions kept in this browser`
       + `${file.edits ? ", and the changes not saved to the workbook yet" : ""}.${other}`, "Restore"))) return;
     try {
-      writeSettings(LOCAL.raw, { spendingBudget: file.settings.spendingBudget || {}, goals: Array.isArray(file.settings.goals) ? file.settings.goals : [] });
+      writeSettings(LOCAL.raw, file.settings);
       if (file.projection) localStorage.setItem(PROJ_KEY, JSON.stringify(file.projection));
       if (file.excluded) localStorage.setItem(EXCL_KEY, JSON.stringify(file.excluded));
       if (file.edits && Array.isArray(file.edits.ops)) writeLocal(LOCAL.raw, { ops: file.edits.ops, savedAt: null, nextId: file.edits.nextId || 1000000 });
@@ -5300,6 +5325,7 @@ function buildLocalBar() {
     $id("localSave").disabled = false;
   });
   $id("localDiscard").addEventListener("click", async () => {
+    try { stopIfChangedElsewhere(); } catch (e) { $id("localStatus").textContent = e.message; $id("localStatus").classList.add("bad"); return; }
     if (!(await ask(`Discard ${plural(LOCAL.store.ops.length, "change")}?`, "They're only in this browser, so they can't be brought back.", "Discard"))) return;
     // Goals and budgets follow renamed accounts back to their workbook names.
     LOCAL.state.accounts.forEach((a, i) => renameInLocalSettings(a.name, LOCAL.raw.tracker.accounts[i].name));
@@ -5621,31 +5647,7 @@ function stylesXml(t) {
 }
 
 /** A zip of stored (uncompressed) entries: every spreadsheet app reads these. */
-function zipStored(files) {
-  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-  const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
-  const enc = new TextEncoder(), parts = [], central = [];
-  let offset = 0;
-  for (const [name, text] of files) {
-    const nameB = enc.encode(name), data = enc.encode(text), crc = crc32(data);
-    const head = new DataView(new ArrayBuffer(30));
-    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, 0, 2], [12, 0x21, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, nameB.length, 2], [28, 0, 2]]
-      .forEach(([at, v, size]) => (size === 4 ? head.setUint32(at, v, true) : head.setUint16(at, v, true)));
-    const dir = new DataView(new ArrayBuffer(46));
-    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, 0, 2], [14, 0x21, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4],
-     [28, nameB.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]]
-      .forEach(([at, v, size]) => (size === 4 ? dir.setUint32(at, v, true) : dir.setUint16(at, v, true)));
-    parts.push(new Uint8Array(head.buffer), nameB, data);
-    central.push(new Uint8Array(dir.buffer), nameB);
-    offset += 30 + nameB.length + data.length;
-  }
-  const dirSize = central.reduce((n, b) => n + b.length, 0), end = new DataView(new ArrayBuffer(22));
-  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, dirSize, 4], [16, offset, 4], [20, 0, 2]]
-    .forEach(([at, v, size]) => (size === 4 ? end.setUint32(at, v, true) : end.setUint16(at, v, true)));
-  const all = parts.concat(central, [new Uint8Array(end.buffer)]), out = new Uint8Array(offset + dirSize + 22);
-  let p = 0; for (const b of all) { out.set(b, p); p += b.length; }
-  return out;
-}
+const zipStored = (files) => writeZip(files.map(([name, text]) => ({ name, text })));
 
 /** The tracker as .xlsx bytes. */
 const buildWorkbook = (t, note) => packWorkbook("Tracker", sheetXml(t, note), stylesXml(t));

@@ -103,6 +103,18 @@ RUN = r"""
       out.patched = btoa(bin);
       // A workbook changed in Excel since the build (a renamed column) is refused.
       try { await patchWorkbook(Uint8Array.from(atob(window.__BOOK2), (c) => c.charCodeAt(0))); out.stale = "accepted"; } catch (e) { out.stale = e.message; }
+      // Filled-down (shared) formulas: a deleted row's shared Total is kept; changing a shared formula's top cell is refused.
+      const book = (k) => Uint8Array.from(atob(window[k]), (c) => c.charCodeAt(0));
+      try { const z = readZip(await patchWorkbook(book("__BOOK3"))).find((e) => e.name === "xl/worksheets/sheet1.xml");
+            out.sharedTotal = (await zipEntryText(z)).match(/<c r="R8"[^>]*>.*?<\/c>/)[0]; } catch (e) { out.sharedTotal = "ERR " + e.message; }
+      try { await patchWorkbook(book("__BOOK4")); out.sharedEdit = "accepted"; } catch (e) { out.sharedEdit = e.message; }
+      // Another tab changed what's kept: this one refuses instead of writing over it.
+      const k = localKey(LOCAL.raw), was = localStorage.getItem(k);
+      out.key = k;
+      localStorage.setItem(k, was + " ");
+      try { await api("POST", "/api/snapshots", { date: "2026-12-04", balances: [[EDIT.accounts[0].id, 1]] }); out.otherTab = "accepted"; } catch (e) { out.otherTab = e.message; }
+      try { await saveToWorkbook(); out.otherTabSave = "accepted"; } catch (e) { out.otherTabSave = e.message; }
+      localStorage.setItem(k, was);
       out.ops = LOCAL.store.ops;
       out.expect = { dates: DATA.dates, accounts: DATA.accounts.map((a) => ({ name: a.name, series: a.series, closed: a.closed })), edit: EDIT.accounts };
       out.errors = __errors;
@@ -136,7 +148,23 @@ def main():
                 data = data.replace(b"<t>Checking</t>", b"<t>Everyday checking</t>", 1)
             zout.writestr(item, data)
     book2 = base64.b64encode(buf.getvalue()).decode()
-    html = html.replace("<head>", "<head>" + PROBE, 1).replace("</body>", f"<script>window.__BOOK = {json.dumps(book64)}; window.__BOOK2 = {json.dumps(book2)}; window.__ST = {json.dumps((ROOT / 'test/statements/demo-checking-4821.csv').read_text())};</script>" + RUN + "</body>", 1)
+
+    def sheet_variant(*swaps):
+        b = io.BytesIO()
+        with zipfile.ZipFile(BOOK) as zin, zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    for old, new in swaps:
+                        assert old.encode() in data, old
+                        data = data.replace(old.encode(), new.encode(), 1)
+                zout.writestr(item, data)
+        return base64.b64encode(b.getvalue()).decode()
+    # Total filled down from row 8 (the row the probe deletes), and a balance the probe changes (B109) as a shared formula's top cell.
+    book3 = sheet_variant(('<c r="R8"><f>SUM(B8:Q8)</f>', '<c r="R8"><f t="shared" ref="R8:R9" si="0">SUM(B8:Q8)</f>'),
+                          ('<f>SUM(B9:Q9)</f>', '<f t="shared" si="0"/>'))
+    book4 = sheet_variant(('<c r="B109"><v>8270.21</v>', '<c r="B109"><f t="shared" ref="B109:B109" si="7">8270.21</f><v>8270.21</v>'))
+    html = html.replace("<head>", "<head>" + PROBE, 1).replace("</body>", f"<script>window.__BOOK = {json.dumps(book64)}; window.__BOOK2 = {json.dumps(book2)}; window.__BOOK3 = {json.dumps(book3)}; window.__BOOK4 = {json.dumps(book4)}; window.__ST = {json.dumps((ROOT / 'test/statements/demo-checking-4821.csv').read_text())};</script>" + RUN + "</body>", 1)
     page = tmp / "probe.html"
     page.write_text(html, encoding="utf-8")
     profile = tmp / "profile"
@@ -149,6 +177,7 @@ def main():
     import html as H
     out = json.loads(H.unescape(m.group(1)))
     fails = []
+    if "first" not in out: sys.exit(f"probe failed: {out}"[:3000])
     first = out["first"]
     if first["errors"] or out["errors"]:
         fails.append(("page errors", first["errors"] + out["errors"]))
@@ -182,6 +211,16 @@ def main():
         fails.append(("goals and budgets (renamed with the account)", out["settings"]))
     if out["goalsView"] != {"view": "goals", "nav": True, "cards": ["Card paid off", "Holiday"], "localNote": False}:
         fails.append(("goals view", out["goalsView"]))
+    print("shared Total kept:", out["sharedTotal"], "| shared top cell:", out["sharedEdit"])
+    if 'ref="R8:R9"' not in out["sharedTotal"]:
+        fails.append(("a deleted row's shared Total formula was not kept", out["sharedTotal"]))
+    if "B109" not in out["sharedEdit"]:
+        fails.append(("changing a shared formula's top cell was not refused", out["sharedEdit"]))
+    print("other tab:", out["otherTab"], "|", out["otherTabSave"], "| key:", out["key"])
+    if "another tab" not in out["otherTab"] or "another tab" not in out["otherTabSave"]:
+        fails.append(("a change from a stale tab was not refused", out["otherTab"], out["otherTabSave"]))
+    if out["key"] != "nw-local-edits:" + expected["bookId"]:
+        fails.append(("edits not kept under the workbook's id", out["key"]))
     if "changed since this dashboard was built" not in out["stale"]:
         fails.append(("stale workbook accepted", out["stale"]))
     # Save to workbook, read back by build_dashboard.py
@@ -221,10 +260,10 @@ def main():
   const o = document.getElementById("probeOut");
   if (!localStorage.getItem("ops-set")) {
     localStorage.clear(); localStorage.setItem("ops-set", "1");
-    localStorage.setItem("nw-local-edits:" + DATA.source, JSON.stringify({ ops: __OPS, savedAt: 1, nextId: 1000002 }));
+    localStorage.setItem(localKey(LOCAL.raw), JSON.stringify({ ops: __OPS, savedAt: 1, nextId: 1000002 }));
     location.reload(); return;
   }
-  o.textContent = JSON.stringify({ kept: localStorage.getItem("nw-local-edits:" + DATA.source), bar: document.getElementById("localBar").hidden, n: DATA.dates.length });
+  o.textContent = JSON.stringify({ kept: localStorage.getItem(localKey(LOCAL.raw)), bar: document.getElementById("localBar").hidden, n: DATA.dates.length });
 })();
 </script>""".replace("__OPS", json.dumps(ops))
     (tmp / "probe2.html").write_text(html2.replace("</body>", check + "</body>", 1), encoding="utf-8")
@@ -239,16 +278,23 @@ def main():
         fails.append(("edits not dropped after rebuilding from the saved workbook", after_rebuild))
     # A name or a date twice is refused with a message saying where.
     import openpyxl
-    for what, edit, want in (("name", lambda ws: setattr(ws.cell(4, 3), "value", ws.cell(4, 2).value), "Two accounts"),
+    for what, edit, want in (("text", lambda ws: setattr(ws.cell(5, 2), "value", "abc"), "Cell B5 isn't a number"),
+                             ("name", lambda ws: setattr(ws.cell(4, 3), "value", ws.cell(4, 2).value), "Two accounts"),
                              ("date", lambda ws: setattr(ws.cell(6, 1), "value", ws.cell(5, 1).value), "both have the date")):
         wb = openpyxl.load_workbook(BOOK); edit(wb.worksheets[0]); wb.save(tmp / f"twin-{what}.xlsx")
         try:
             build_dashboard.extract(tmp / f"twin-{what}.xlsx"); got = "accepted"
         except SystemExit as e:
             got = str(e)
-        print(f"twin {what}:", got)
+        print(f"refused ({what}):", got)
         if want not in got:
             fails.append((f"a {what} twice was not refused", got))
+    wb = openpyxl.load_workbook(BOOK); ws = wb.worksheets[0]
+    as_number = ws.cell(5, 2).value; ws.cell(5, 2).value = f" {as_number} "; wb.save(tmp / "text-number.xlsx")
+    read = build_dashboard.extract(tmp / "text-number.xlsx")["accounts"][0]["series"][0]
+    print("a balance typed as text:", read)
+    if read != round(as_number, 2):
+        fails.append(("a balance typed as text was not read", read, as_number))
     if fails:
         print("FAIL"); [print(" ", f) for f in fails]; sys.exit(1)
     print("local checks: OK")
